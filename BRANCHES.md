@@ -53,7 +53,7 @@ git merge main        # 有冲突就按提示解，通常不会（两边改的�
 
 | 文件 | 差异 |
 |---|---|
-| `config.py` | 删 `lmstudio` / `ollama` 两个本地预设；删 `sovitsPython` / `sovitsScript` / `sovitsConfig` / `sovitsAutoStart`；默认 `provider=dashscope`、`ttsProvider=edge` |
+| `config.py` | 删 `lmstudio` / `ollama` 两个本地预设；删 `sovitsPython` / `sovitsScript` / `sovitsConfig` / `sovitsAutoStart` / `sovitsFfmpegDir` / `sovitsNltkData`；默认 `provider=dashscope`、`ttsProvider=edge` |
 | `tts.py` | 删本地拉起逻辑（`subprocess.Popen`、NLTK/ffmpeg 路径、进程冷却）约 100 行；只保留 HTTP 客户端；参考音频按「服务端路径」处理 |
 | `voice.py` | 提示文案从「本地拉起」改为「远端服务」 |
 | `Dockerfile` | 注释改为云端语义 |
