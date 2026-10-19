@@ -1,5 +1,5 @@
 {
-  "name": "铃铛",
+  "name": "铃洛",
   "provider": "lmstudio",
   "ttsProvider": "gptsovits",
   "sovitsBaseUrl": "http://127.0.0.1:9880",
@@ -9,6 +9,7 @@
   "sovitsRefAudio": "",
   "sovitsRefText": "",
   "sovitsRefLang": "zh",
+  "ownerQq": "",
   "qqEnabled": false,
   "qqWsUrl": "ws://127.0.0.1:3001"
 }
