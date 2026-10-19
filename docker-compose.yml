@@ -41,9 +41,11 @@ services:
     command: ["python", "qq.py"]
     profiles: ["qq"]
     # 必须覆盖 Dockerfile 里的健康检查：qq.py 不开 HTTP 端口，
-    # 沿用那条 8000/healthz 检查必然失败，进程明明活着也会被判 unhealthy
+    # 沿用那条 8000/healthz 检查必然失败，进程明明活着也会被判 unhealthy。
+    # 这里读 /proc/1/cmdline 判断主进程还在不在，只依赖 Python，
+    # 不用 pgrep/ps —— slim 镜像里通常没装 procps
     healthcheck:
-      test: ["CMD-SHELL", "pgrep -f 'python qq.py' > /dev/null || exit 1"]
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if b'qq.py' in open('/proc/1/cmdline','rb').read() else 1)"]
       interval: 30s
       timeout: 5s
       retries: 3
