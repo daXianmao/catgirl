@@ -1,7 +1,8 @@
 # AI 猫娘 · 云端部署版
 
 > **这是 `cloud` 分支**：模型一律走在线 API，不需要显卡，不装任何本地推理服务。
-> 想在本机跑 LM Studio / Ollama 或本地 GPT-SoVITS，请看 `local` 分支。
+> 想在本机跑 LM Studio / Ollama 或本地 GPT-SoVITS，请切 `main` 分支。
+> 两个分支的差异清单与切换方法见 [BRANCHES.md](BRANCHES.md)。
 
 保留三样东西：**猫娘本体**（人格 + 三层长期记忆 + 网页）、**QQ 接入**、**语音**。
 
