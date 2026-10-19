@@ -48,7 +48,7 @@ def cmdStatus(args):
         if engine.sovitsHealth():
             print(f"推理服务  就绪 · {baseUrl}")
         else:
-            print(f"推理服务  没在跑（{baseUrl}），合成时会自动拉起（首次约 40 秒）")
+            print(f"推理服务  连不上（{baseUrl}），请确认远端 api_v2 已启动、端口已放通")
         print(f"角色参考  {engine.cfg.get('sovitsRefAudio') or '（未配置）'}")
     print(f"克隆音色  {data.get('customVoiceUri') or '（无）'}")
     print(f"密钥      {'已配置' if engine.apiKey() else '未配置'}")
@@ -163,7 +163,7 @@ def cmdClone(args):
             "refAudio": refName,
             "refText": args.text.strip(),
             "format": "wav" if local else "mp3",
-            # 本地后端的「音色」就是这份参考音频，没有独立 voice id
+            # 自建后端的「音色」就是这份参考音频，没有独立 voice id
             "voice": "reference" if local else engine.profile.voice,
         }
     )
@@ -173,7 +173,7 @@ def cmdClone(args):
         uri = engine.uploadReference(refPath, args.text.strip(), args.name)
         print(f"克隆完成，音色 ID：{uri}")
     else:
-        print("本地参考音频就绪。启动 GPT-SoVITS 的 api_v2.py 后即可直接用这个音色说话。")
+        print("参考音频已登记。把这份文件放到 GPT-SoVITS 那台机器上，路径填进 sovitsRefAudio 即可。")
 
 
 def cmdSay(args):

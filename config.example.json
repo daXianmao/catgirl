@@ -1,11 +1,8 @@
 {
   "name": "铃铛",
-  "provider": "lmstudio",
-  "ttsProvider": "gptsovits",
-  "sovitsBaseUrl": "http://127.0.0.1:9880",
-  "sovitsAutoStart": true,
-  "sovitsRefText": "我现在需要一个长达三秒的语音",
-  "sovitsRefLang": "zh",
+  "provider": "dashscope",
+  "ttsProvider": "edge",
+  "ttsVoice": "zh-CN-XiaoyiNeural",
   "qqEnabled": false,
   "qqWsUrl": "ws://127.0.0.1:3001"
 }

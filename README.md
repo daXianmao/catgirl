@@ -1,54 +1,61 @@
-# AI 猫娘 · 三层长期记忆
+# AI 猫娘 · 云端部署版
 
-一套代码两种用法：本地终端里陪聊，或者部署成 HTTP 服务供网页/App/小程序调用。
-模型可以是本机跑的，也可以是线上 API——换一个 `provider` 就切过去了。
+> **这是 `cloud` 分支**：模型一律走在线 API，不需要显卡，不装任何本地推理服务。
+> 想在本机跑 LM Studio / Ollama 或本地 GPT-SoVITS，请看 `local` 分支。
+
+保留三样东西：**猫娘本体**（人格 + 三层长期记忆 + 网页）、**QQ 接入**、**语音**。
 
 ```
-catgirl.py     命令行入口（本地调试）
-server.py      FastAPI 服务（线上部署）
+server.py      FastAPI 服务（对外入口）
 core.py        核心：人格、记忆、上下文组装
-brain.py       模型调用层：本地 / 在线统一接口
+brain.py       模型调用层：只连在线 API，自动适配各家结构化输出
 memory.py      记忆库：SQLite + 向量检索 + 混合打分
-tts.py         语音层：预设音色 + 参考音频克隆
+tts.py         语音层：edge / 硅基流动 / OpenAI / 自建 SoVITS
 voice.py       音色管理命令行（试听 / 换音色 / 克隆）
 qq.py          QQ 适配器（OneBot v11，对接 NapCat / Lagrange）
-config.py      配置：provider 预设 + 环境变量
+config.py      配置：在线服务商预设 + 环境变量
+catgirl.py     命令行入口（服务器上直接聊两句调试用）
 persona.md     人格设定，改这里换性格
 web/index.html 内置聊天页面
+deploy/        systemd 单元 / 假协议端 / 云端自检脚本
 ```
 
-## 一、本地跑起来
+## 一、五分钟跑起来
+
+云端版唯一需要的就是一个**在线模型 API Key**（任选一家，见下表）。
 
 ```bash
-cd "D:/AI Tools/catgirl"
-python catgirl.py
+cp .env.example .env
+# 改三行：CATGIRL_PROVIDER / CATGIRL_API_KEY / CATGIRL_SERVER_KEY
+docker compose up -d --build
+docker compose logs -f
 ```
 
-默认走 LM Studio（`127.0.0.1:1234`）：先启动本地服务器，
-加载一个对话模型（如 `qwen/qwen3.8-27b`）和一个向量模型（如 `nomic-embed-text`）。
+打开 `http://服务器IP:8000` 就是聊天页，`/docs` 是交互式 API 文档。
 
-## 二、换成在线大模型
-
-密钥只走环境变量，不进代码、不进 git：
+裸机（不用 Docker）：
 
 ```bash
-# Linux / macOS
-export CATGIRL_PROVIDER=dashscope
-export CATGIRL_API_KEY=sk-xxxxxx
-python catgirl.py
-
-# Windows PowerShell
-$env:CATGIRL_PROVIDER="dashscope"
-$env:CATGIRL_API_KEY="sk-xxxxxx"
-python catgirl.py
+python3 -m venv .venv && .venv/bin/pip install -r requirements.txt
+cp .env.example .env && vi .env
+set -a && . ./.env && set +a
+.venv/bin/python catgirl.py        # 终端里直接聊，验证 key 通不通
 ```
 
-也可以临时指定：`python catgirl.py --provider deepseek --model deepseek-chat`
+确认配置算不算对，跑一下自检（不联网、不消耗 token）：
 
-| provider | 默认对话模型 | 默认向量模型 | 需要的密钥变量 |
+```bash
+.venv/bin/python deploy/cloud_selfcheck.py
+```
+
+它会检查：默认服务商是不是在线、语音默认是不是 edge、有没有残留的本地推理参数。
+
+## 二、选对话模型
+
+全部走 OpenAI 兼容接口，换 `CATGIRL_PROVIDER` 就行，代码不用动：
+
+| provider | 默认对话模型 | 默认向量模型 | 密钥变量 |
 |---|---|---|---|
-| `lmstudio` | qwen/qwen3.8-27b | nomic-embed-text | 无（本地） |
-| `ollama` | qwen2.5:7b | nomic-embed-text | 无（本地） |
 | `openai` | gpt-4o-mini | text-embedding-3-small | `OPENAI_API_KEY` |
 | `deepseek` | deepseek-chat | 无 | `DEEPSEEK_API_KEY` |
 | `moonshot` | moonshot-v1-8k | 无 | `MOONSHOT_API_KEY` |
@@ -61,26 +68,25 @@ DeepSeek / Moonshot / OpenRouter 没有 embedding 接口，长期记忆会退化
 「重要度 + 新鲜度」排序。想保留语义召回，把向量单独指向一家：
 
 ```bash
-export CATGIRL_PROVIDER=deepseek
-export CATGIRL_API_KEY=sk-deepseek
-export CATGIRL_EMBED_BASE_URL=https://api.siliconflow.cn/v1
-export CATGIRL_EMBED_API_KEY=sk-siliconflow
-export CATGIRL_EMBED_MODEL=BAAI/bge-m3
+CATGIRL_PROVIDER=deepseek
+CATGIRL_API_KEY=sk-deepseek
+CATGIRL_EMBED_BASE_URL=https://api.siliconflow.cn/v1
+CATGIRL_EMBED_API_KEY=sk-siliconflow
+CATGIRL_EMBED_MODEL=BAAI/bge-m3
 ```
 
-中文场景强烈建议用 `bge-m3` 这类中文向量模型：`nomic-embed-text` 实测对中文否定
-几乎无感（「讨厌香菜」和「喜欢香菜」余弦相似度 = 1.0），程序虽然加了极性校验兜底，
-但换模型才是根治。
+中文场景强烈建议用 `bge-m3` 这类中文向量模型：英文向量模型对中文否定几乎无感
+（「讨厌香菜」和「喜欢香菜」余弦相似度 = 1.0），程序虽加了极性校验兜底，换模型才是根治。
 
-## 三、部署到服务器
+## 三、部署
 
 ### 方式 A：Docker（推荐）
 
 ```bash
 git clone <你的仓库> catgirl && cd catgirl
+git checkout cloud
 cp .env.example .env       # 填 CATGIRL_PROVIDER / CATGIRL_API_KEY / CATGIRL_SERVER_KEY
 docker compose up -d --build
-docker compose logs -f
 ```
 
 记忆库在命名卷 `catgirl_data` 里，容器重建不丢。
@@ -119,7 +125,7 @@ Caddy 更省事：`catgirl.example.com { reverse_proxy 127.0.0.1:8000 { flush_in
 1. **设 `CATGIRL_SERVER_KEY`**，否则 `/api/*` 谁都能调，烧的是你的 token。
 2. 前面再套一层登录或网关，`X-User-Id` 只是隔离标识，不是身份认证。
 3. 给 `data/` 配卷或备份，那是猫娘的全部记忆。
-4. 本地模型只能 `--workers 1`；接在线 API 才适合加 worker。
+4. 单 worker 起就够了：瓶颈在上游 API 的延迟，不在本机 CPU。
 
 ## 四、API
 
@@ -179,114 +185,80 @@ res = requests.post(
 print(res.json()["reply"])
 ```
 
-## 五、语音与音色克隆
+## 五、语音
 
-三条路，按「省事 → 像本人」排：
+云端版默认用 `edge`：免费、免密钥、零部署，适合服务器直接开箱用。
 
 | 后端 | 能克隆 | 成本 | 前提 |
 |---|---|---|---|
 | `edge` | ❌ 只能选预设音色 | 免费 | 服务器能访问微软 TTS |
 | `siliconflow` | ✅ 10 秒录音零样本克隆 | 按字符计费，很便宜 | API Key + **账号实名认证** |
-| `gptsovits` | ✅ 完全离线克隆，最像，32kHz 更亮 | 电费 | 本机跑 `D:\AI Tools\gpt_sovits` 的 api_v2（加载约 40 秒） |
-
-> 本机现在默认就是 `gptsovits`：角色参考音频由 `config.json` 的 `sovitsRefAudio` 指定
-> （`D:\AI Tools\gpt_sovits\models\lty_ref.wav`），逐字稿在 `sovitsRefText`。
-> 服务没起时猫娘会自动拉起 api_v2（首次约 40 秒）。
+| `openai` | ❌ 固定音色 | 按量计费 | 任意 OpenAI 兼容 `/audio/speech` |
+| `gptsovits` | ✅ 参考音频克隆，最像 | 自建机器的电费 | 另起一台带 GPU 的机器跑 `api_v2.py` |
 
 ### 选音色（立即可用）
 
 ```bash
-python voice.py list                  # 看有哪些音色
-python voice.py use xiaoyi            # 换成晓伊（少女感）
-python voice.py use xiaoxiao --rate +8%   # 晓晓，语速快 8%
-python voice.py say "主人，听得到吗" --play
+.venv/bin/python voice.py list                  # 看有哪些音色
+.venv/bin/python voice.py use xiaoyi            # 换成晓伊（少女感）
+.venv/bin/python voice.py use xiaoxiao --rate +8%   # 晓晓，语速快 8%
+.venv/bin/python voice.py say "主人，听得到吗" --play
 ```
 
 或在网页里展开「记忆」面板，底部有音色下拉、试听和克隆入口。
 
-### 部署在服务器上怎么选
-
-| 场景 | 选它 | 理由 |
-|---|---|---|
-| 自己机器、有独显、要完全私有（推荐自用） | `gptsovits` | 离线、免密钥、最像；一句 5~10 秒，占 4~6GB 显存 |
-| 自己用 / 内网 / 不对外开放、又没显卡 | `edge` | 0 成本，音质够好；但要服务器能出网，且它是非官方接口 |
-| 对外提供服务（推荐） | `siliconflow` | 国内节点、流式 150ms、可克隆；¥0.05/千 UTF-8 字节，80 字回复约 1 分钱，一天百来轮一两块 |
-| 服务器带 GPU、要完全私有 | `gptsovits` | 克隆最像、无外部依赖；占 3~4GB 内存 + 7~8GB 磁盘 |
-| 商用要 SLA / 合规 | Azure 语音 | 每月 50 万字符免费，有商用授权；但不支持克隆 |
-
-几个容易踩的部署点：
-
-- **纯 CPU 的小 VPS 别上 GPT-SoVITS**：2 核 4G 合成一句要好几秒，并发一来就排队。
-- **`edge` 不要挂在对公网接口后面**：没 SLA、可能被限流，且微软随时改协议。
-- **多实例部署**：语音文件落在 `<dataDir>/users/<id>/audio/`，多台机器要挂共享卷或改成对象存储。
-- **TTS 失败不影响聊天**：合成异常只会写进 `audioError`，文字照常返回。
-
-### 本机（GPT-SoVITS，默认在用）
-
-GPT-SoVITS 跑在独立环境（`D:\AI Tools\gpt_sovits\env312`，ROCm 版 torch），
-用官方 `api_v2.py` 做成常驻 HTTP 服务，猫娘通过 `http://127.0.0.1:9880` 调它——
-1.4GB 模型只加载一次，之后每句话直接合成（32kHz，一句约 5~10 秒）。
-
-```bash
-# 手动起（可选，猫娘也会自己拉；首次加载约 40 秒）
-双击 D:\AI Tools\gpt_sovits\start_sovits.cmd
-
-# 换参考音色
-python voice.py clone 我的录音.wav --text "录音里逐字对应的原话" --provider gptsovits
-python voice.py status          # 能看到推理服务是否就绪
-python voice.py say "主人，听得到吗" --play
-```
-
-调参（`config.json` 或环境变量）：
-
-| 键 | 默认 | 说明 |
-|---|---|---|
-| `sovitsRefAudio` | `...\models\lty_ref.wav` | 角色参考音频，换它就换声音 |
-| `sovitsRefText` | 见 config | 参考音频里逐字对应的原话，必须一致 |
-| `sovitsRefLang` | zh | 参考音频语种 |
-| `sovitsAutoStart` | true | 服务没起时自动拉起来 |
-| `sovitsBaseUrl` | `http://127.0.0.1:9880` | 换机器/换端口时改这里 |
-
-### 云端 / 其它本地后端
-
-**云端（硅基流动 CosyVoice2，最省事）**
+### 想克隆成「某个人的声音」
 
 ```bash
 export CATGIRL_TTS_PROVIDER=siliconflow
 export CATGIRL_TTS_KEY=sk-xxxx
-python voice.py clone 我的录音.wav --text "录音里逐字对应的原话"
+.venv/bin/python voice.py clone 我的录音.wav --text "录音里逐字对应的原话"
 ```
 
 返回一个 `speech:名字:xxx:xxx` 的音色 ID，之后所有回复都用这个声音。
 
-**本地（GPT-SoVITS，完全离线、最像）**
+### 可选：自建 GPT-SoVITS（最像，但要另一台机器）
+
+猫娘**不会**帮你启动它，只当 HTTP 服务调用；所以它可以跑在任何一台带 GPU 的机器上，
+云端这台机器只负责发请求：
 
 ```bash
-# 1) 下载 GPT-SoVITS，启动它的 api_v2.py（默认 9880 端口）
-# 2) 告诉猫娘去哪儿找
-export CATGIRL_TTS_PROVIDER=gptsovits
-export CATGIRL_TTS_BASE_URL=http://127.0.0.1:9880
-python voice.py clone 我的录音.wav --text "录音里逐字对应的原话"
-python voice.py say "这个声音就是我自己的了" --play
+# 在 GPU 机器上
+git clone https://github.com/RVC-Boss/GPT-SoVITS && cd GPT-SoVITS
+python api_v2.py -a 0.0.0.0 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
+
+# 在猫娘这台机器上
+CATGIRL_TTS_PROVIDER=gptsovits
+CATGIRL_SOVITS_URL=http://10.0.0.8:9880
+CATGIRL_SOVITS_REF=/opt/GPT-SoVITS/refs/bell.wav   # 填「服务端」上的路径
+CATGIRL_SOVITS_REF_TEXT=我现在需要一个长达三秒的语音
 ```
 
-参考音频的硬要求（各家都一样，决定成败）：
+注意 `sovitsRefAudio` 是**推理服务那台机器上的路径**，不是猫娘容器的路径。
+连不上时 `/api/tts` 会明确报「连不上 GPT-SoVITS（地址）」，不会有隐藏的本地拉起行为。
+
+### 参考音频的硬要求（各家都一样，决定成败）
 
 - **5~15 秒**，干净人声，无背景音乐、无混响、无第二个人说话
 - `--text` 必须和录音内容**逐字一致**，包括「嗯」「那个」这类语气词
-- 格式 wav/mp3/m4a 都行，16kHz 以上；**优先 WAV 单声道**，最稳
-  （GPT-SoVITS 内部用 ffmpeg 解码，mp3 也能读，只是偶尔有边界问题），5~10 秒最佳
+- 格式 wav/mp3/m4a 都行，16kHz 以上；**优先 WAV 单声道**，5~10 秒最佳
 
 ### 对话直接返回语音
 
 `POST /api/chat` 加 `"audio": true`，返回里会多出 `audioUrl`：
 
 ```json
-{"reply":"……你好呀。","audioUrl":"/api/audio/1792408545-453a27ea.wav","audioProvider":"gptsovits"}
+{"reply":"……你好呀。","audioUrl":"/api/audio/1792408545-453a27ea.mp3","audioProvider":"edge"}
 ```
 
 流式接口同样，`meta` 事件里带 `audioUrl`。语音合成在正文吐完之后才做，
 不拖慢首字延迟；相同文本会命中缓存，第二次直接返回。
+
+### 几个容易踩的点
+
+- **`edge` 不要挂在对公网接口后面**：没 SLA、可能被限流，且微软随时改协议。对外请用 `siliconflow`。
+- **多实例部署**：语音文件落在 `<dataDir>/users/<id>/audio/`，多台机器要挂共享卷或改成对象存储。
+- **TTS 失败不影响聊天**：合成异常只会写进 `audioError`，文字照常返回。
 
 ## 六、接入 QQ
 
@@ -299,7 +271,8 @@ python voice.py say "这个声音就是我自己的了" --play
 | **协议端**（NapCat / Lagrange） | 要，常驻一个 QQ 客户端容器 | NapCat 约 400~700MB 内存 | 非官方实现，**违反 QQ 用户协议，有封号风险**，只建议小号 |
 | **QQ 官方机器人** | 不要，走 Webhook | 几乎为零 | 要企业/个人开发者认证、备案域名 + HTTPS，私聊权限受限，需审核 |
 
-下面的实现按**协议端**做（能私聊、能群聊、不用审核）。如果你的目标是正式对外的服务，应该走官方机器人，不要用协议端。
+下面的实现按**协议端**做（能私聊、能群聊、不用审核）。如果你的目标是正式对外的服务，
+应该走官方机器人，不要用协议端。
 
 ### 起协议端（NapCat，Docker）
 
@@ -352,16 +325,16 @@ python qq.py --debug    # 退出时打印收发统计
 
 ### 关于 2核2G 够不够
 
-猫娘本体实测常驻 **54~66MB**，NapCat 是 Electron 版 QQ，实测 **400~700MB**。
-加上系统占用，2核2G 跑「猫娘 + 协议端」是**能跑但没余量**的：
+猫娘本体实测常驻 **54~66MB**，NapCat 是 Electron 版 QQ，实测 **400~700MB**：
 
 | 机器 | 建议 |
 |---|---|
-| 2核2G4M | 只跑 `qq.py` + NapCat，别同时跑 Web 服务和 GPT-SoVITS；语音用 cloud 后端 |
-| 2核4G5M | **推荐**。可以同时跑 Web + QQ + 协议端，还能留页面缓存和并发余量 |
-| 2核2G 且要本地克隆音色 | 放弃，GPT-SoVITS 一个就要 3~4GB |
+| 2核2G4M | 只跑 `qq.py` + NapCat，别同时开 Web 服务 |
+| 2核4G5M | **推荐**。Web + QQ + 协议端一起跑，还有并发余量 |
+| 1核1G | 只能跑 Web 或 QQ 其中一个，且要配 swap |
 
-带宽不是问题：文字消息几 KB，语音 24kbps 也就 3KB/s。真正吃的是内存。
+云端版没有本地推理，所以**不需要显卡、也不需要 4G 以上内存**。
+带宽不是问题：文字消息几 KB，语音 24kbps 也就 3KB/s。
 
 ### 不登录 QQ 也能验证
 
@@ -399,9 +372,10 @@ score = 0.65 × 余弦相似度 + 0.25 × (重要度/5) + 0.10 × 时间新鲜�
 
 ## 八、性能与容量
 
-- 单次对话 = 1 次向量 + 1 次流式生成；后台再补 1 次抽取（本地 27B 约 1~3 秒）
+- 单次对话 = 1 次向量 + 1 次流式生成；后台再补 1 次记忆抽取（在线 API 约 1~2 秒）
 - 记忆检索是纯 Python 线性扫描，几千条内无感；上万条建议换 `sqlite-vec` 或 FAISS
 - SQLite 开了 WAL，单机多进程读没问题，写靠文件锁；每用户一个库文件互不干扰
+- 延迟主要取决于上游 API：国内服务商通常 300~800ms 首字，跨境服务商要 1~3s
 
 ## 九、调试
 
@@ -414,12 +388,13 @@ CATGIRL_DEBUG=1 python catgirl.py
 
 ## 十、已知限制
 
-1. **向量质量取决于模型**：英文向量模型对中文否定不敏感，换 `bge-m3` 明显更好。
-2. **近重复记忆**：同义不同措辞仍会留下几条相近记录（阈值与误合并之间的取舍）。
-3. **`X-User-Id` 不是认证**：只做数据隔离，别直接暴露在公网。
-4. **没有记忆衰减曲线**：只有检索时的时间衰减和容量淘汰，还没有「反复回忆会加强」。
-5. **edge 不能克隆、也没有情绪**：需要「像某个人」只能走 siliconflow 或 gptsovits。
-6. **克隆效果七成看参考音频**：录音有底噪、有伴奏、和参考文本差一个字，都会明显掉质量。
-7. **QQ 协议端有封号风险**：NapCat/Lagrange 属于非官方客户端，腾讯随时可能风控；只上小号，别用主号。
-8. **QQ 语音是实验性的**：`record` 段需要协议端自己把 mp3 转成 silk，且容器要能读到 `/data` 里的音频文件；转不了时会退化成只发文字。
-9. **QQ 端不流式**：QQ 没有逐字输出能力，所以是攒完整段再发；首字延迟等于整段生成时间。
+1. **云端版没有本地推理**：断网就彻底不能说话。需要离线能力请用 `local` 分支。
+2. **向量质量取决于模型**：英文向量模型对中文否定不敏感，换 `bge-m3` 明显更好。
+3. **近重复记忆**：同义不同措辞仍会留下几条相近记录（阈值与误合并之间的取舍）。
+4. **`X-User-Id` 不是认证**：只做数据隔离，别直接暴露在公网。
+5. **没有记忆衰减曲线**：只有检索时的时间衰减和容量淘汰，还没有「反复回忆会加强」。
+6. **edge 不能克隆、也没有情绪**：需要「像某个人」只能走 siliconflow 或自建 gptsovits。
+7. **克隆效果七成看参考音频**：录音有底噪、有伴奏、和参考文本差一个字，都会明显掉质量。
+8. **QQ 协议端有封号风险**：NapCat/Lagrange 属于非官方客户端，腾讯随时可能风控；只上小号，别用主号。
+9. **QQ 语音是实验性的**：`record` 段需要协议端自己把 mp3 转成 silk，且容器要能读到 `/data` 里的音频文件；转不了时会退化成只发文字。
+10. **QQ 端不流式**：QQ 没有逐字输出能力，所以是攒完整段再发；首字延迟等于整段生成时间。

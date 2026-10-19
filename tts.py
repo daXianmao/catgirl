@@ -1,11 +1,14 @@
-"""TTS 层：预设音色 + 参考音频克隆。
+"""TTS 层（云端部署版）：预设音色 + 参考音频克隆。
 
 四种后端，一套接口：
 
-    gptsovits    本地 GPT-SoVITS api_v2 常驻服务，参考音频克隆，完全离线（本机首选）
-    edge         微软 Edge 在线音色，免费、零部署，只能选音色不能克隆
-    openai       任意 OpenAI 兼容的 /audio/speech（OpenAI、Fish、本地网关等）
-    siliconflow  硅基流动 CosyVoice2，支持上传参考音频做零样本克隆（需实名）
+    edge         微软 Edge 在线音色，免费、零部署，云端默认（只能选音色不能克隆）
+    siliconflow  硅基流动 CosyVoice2，上传参考音频做零样本克隆（需实名）
+    openai       任意 OpenAI 兼容的 /audio/speech（OpenAI、Fish、自建网关等）
+    gptsovits    自建 GPT-SoVITS 的 HTTP 服务，参考音频克隆（只连接，不启动进程）
+
+云端版没有任何本地推理依赖：不 spawn 子进程、不读 Windows 路径、不加载模型。
+想换成本地推理请看 local 分支。
 
 音色配置分级：全局 config / 环境变量 < 用户目录下的 profile.json。
 这样线上多用户可以各自换声音，而不用改服务端配置。
@@ -20,7 +23,6 @@ import mimetypes
 import os
 import re
 import shutil
-import subprocess
 import tempfile
 import threading
 import time
@@ -143,11 +145,11 @@ TTS_PROVIDER_INFO = {
         "offline": False,
     },
     "gptsovits": {
-        "label": "本地 GPT-SoVITS",
-        "hint": "离线克隆，需要本机跑 api_v2.py，7~8GB 模型",
+        "label": "自建 GPT-SoVITS",
+        "hint": "参考音频克隆，需另起一个 api_v2 服务（可以跨机器），本机不占资源",
         "clone": True,
         "needsKey": False,
-        "offline": True,
+        "offline": False,
     },
     "openai": {
         "label": "OpenAI 兼容 TTS",
@@ -276,30 +278,21 @@ def _open(url, payload=None, headers=None, method=None):
         raise TTSError(f"连不上 TTS 服务 {url}：{exc.reason}") from None
 
 
-# ------------------------------------------------------- 本地常驻语音服务（SoVITS）
-# GPT-SoVITS 跑在独立环境（D:\AI Tools\gpt_sovits\env312，带 ROCm 版 torch），
-# 不在猫娘的 .venv 里，所以只能通过 HTTP 找它；第一次用到时如果没起，就顺手拉起来。
-SOVITS_DEFAULT_URL = "http://127.0.0.1:9880"
-SOVITS_DEFAULT_PYTHON = r"D:\AI Tools\gpt_sovits\env312\python.exe"
-SOVITS_DEFAULT_SCRIPT = r"D:\AI Tools\gpt_sovits\GPT-SoVITS\api_v2.py"
-SOVITS_DEFAULT_CONFIG = r"GPT_SoVITS/configs/tts_infer.yaml"
-SOVITS_SPAWN_COOLDOWN = 30  # 秒：拉过就别反复拉，避免刷一堆进程
-SOVITS_PORT_GRACE = 90      # 秒：要加载 1.4G 模型，比 F5 慢，端口迟迟不通才判死
-
-_sovitsServiceLock = threading.Lock()
-_sovitsLastSpawn = 0.0
+# ------------------------------------------------- 远程常驻语音服务（GPT-SoVITS）
+# 云端版只做 HTTP 客户端：服务部署在另一台带 GPU 的机器上，
+# 这里既不会启动它，也不会去猜它的安装路径。
+SOVITS_DEFAULT_URL = ""
 
 # 本机回环地址绝对不能走代理：宿主的透明代理只认 HTTP 转发，127.0.0.1 会被挡成 502
-_LOCAL_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
+_DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
 
-def _localServiceUp(baseUrl, timeout=3.0):
-    """api_v2 是 FastAPI，端口通了说明模型已加载完（加载在启动时同步完成）。"""
-    try:
-        with _LOCAL_OPENER.open(f"{baseUrl}/docs", timeout=timeout) as resp:
-            return resp.status == 200
-    except Exception:
-        return False
+def _openerFor(baseUrl):
+    """回环地址直连，公网地址照常走系统/环境变量里的代理。"""
+    host = urllib.parse.urlparse(baseUrl).hostname or ""
+    if host in ("127.0.0.1", "localhost", "::1"):
+        return _DIRECT_OPENER
+    return urllib.request.build_opener()
 
 
 # ------------------------------------------------------------------ 音色配置
@@ -466,103 +459,32 @@ class TTS:
     # ------------------------------------------------------------ SoVITS 服务
     def sovitsBaseUrl(self):
         return (
-            self.cfg.get("sovitsBaseUrl")
-            or self.cfg.get("ttsBaseUrl")
-            or SOVITS_DEFAULT_URL
+            self.cfg.get("sovitsBaseUrl") or self.cfg.get("ttsBaseUrl") or SOVITS_DEFAULT_URL
         ).rstrip("/")
 
     def sovitsHealth(self):
-        return _localServiceUp(self.sovitsBaseUrl())
-
-    def ensureSovitsService(self, wait=240):
-        """确保推理服务可用：先探活，没起来就拉一个，然后等模型加载完。"""
         baseUrl = self.sovitsBaseUrl()
-        if _localServiceUp(baseUrl):
+        if not baseUrl:
+            return False
+        try:
+            with _openerFor(baseUrl).open(f"{baseUrl}/docs", timeout=3) as resp:
+                return resp.status == 200
+        except Exception:
+            return False
+
+    def ensureSovitsService(self, wait=0):
+        """云端版不拉起进程，只探活：就绪返回 True，否则告诉主人该配哪儿。"""
+        baseUrl = self.sovitsBaseUrl()
+        if not baseUrl:
+            raise TTSError(
+                "GPT-SoVITS 需要自建服务地址：设 CATGIRL_SOVITS_URL=http://你的GPU机器:9880"
+            )
+        if self.sovitsHealth():
             return True
-
-        spawned = False
-        autoStart = self.cfg.get("sovitsAutoStart")
-        autoStart = True if autoStart is None else bool(autoStart)
-        if not autoStart:
-            raise TTSError(
-                f"GPT-SoVITS 没在跑（{baseUrl}）。先双击 D:\\AI Tools\\gpt_sovits\\start_sovits.cmd，"
-                "或把 sovitsAutoStart 设成 true 让它自动拉起"
-            )
-        self._spawnSovits(baseUrl)
-        spawned = True
-
-        # 1.4G 模型加载 + 预热通常 30~60 秒
-        deadline = time.time() + wait
-        graceEnd = time.time() + SOVITS_PORT_GRACE if spawned else deadline
-        while time.time() < deadline:
-            if _localServiceUp(baseUrl):
-                return True
-            if spawned and time.time() > graceEnd:
-                raise TTSError(
-                    f"GPT-SoVITS 没起来（{baseUrl} 端口不通），"
-                    "看 D:\\AI Tools\\gpt_sovits\\api_v2.log 里的报错"
-                )
-            time.sleep(2)
         raise TTSError(
-            f"等了 {wait} 秒 GPT-SoVITS 还没就绪，看看 D:\\AI Tools\\gpt_sovits\\api_v2.log"
+            f"连不上 GPT-SoVITS（{baseUrl}）。云端版不会自动启动它，"
+            "请确认那台机器的 api_v2 已启动、端口已放通"
         )
-
-    def _spawnSovits(self, baseUrl):
-        """后台拉起 api_v2。失败只记日志，交给上层轮询时报错。"""
-        global _sovitsLastSpawn
-        script = self.cfg.get("sovitsScript") or SOVITS_DEFAULT_SCRIPT
-        python = self.cfg.get("sovitsPython") or SOVITS_DEFAULT_PYTHON
-        config = self.cfg.get("sovitsConfig") or SOVITS_DEFAULT_CONFIG
-
-        if not os.path.exists(script) or not os.path.exists(python):
-            raise TTSError(
-                f"找不到 GPT-SoVITS 服务文件（脚本 {script} / Python {python}），"
-                "先按 D:\\AI Tools\\gpt_sovits\\README.md 装好"
-            )
-
-        with _sovitsServiceLock:
-            if time.time() - _sovitsLastSpawn < SOVITS_SPAWN_COOLDOWN:
-                return  # 刚拉过，正在加载，交给外层轮询
-            _sovitsLastSpawn = time.time()
-
-            parsed = urllib.parse.urlparse(baseUrl)
-            port = parsed.port or 9880
-            host = parsed.hostname or "127.0.0.1"
-            command = [python, script, "-a", host, "-p", str(port), "-c", config]
-
-            # api_v2 依赖 NLTK 数据与 ffmpeg，且必须在项目根启动（配置里是相对路径）
-            env = dict(os.environ)
-            env["PYTHONIOENCODING"] = "utf-8"
-            env["NLTK_DATA"] = env.get("NLTK_DATA") or r"D:\AI Tools\nltk_data"
-            env["PATH"] = r"D:\AI Tools\ffmpeg;D:\AI Tools\ffmpeg\bin;" + env.get("PATH", "")
-
-            flags = 0
-            if os.name == "nt":
-                # 脱离控制台，关掉猫娘不会顺手带走它
-                flags = 0x00000008 | 0x00000200  # DETACHED_PROCESS | CREATE_NEW_PROCESS_GROUP
-            # api_v2.py 必须在 GPT-SoVITS 项目根启动（配置里用的是相对路径）
-            projectRoot = os.path.dirname(os.path.abspath(script))
-            logPath = os.path.join(os.path.dirname(projectRoot), "api_v2.log")
-            try:
-                logHandle = open(logPath, "ab")
-            except OSError:
-                logHandle = subprocess.DEVNULL
-            try:
-                subprocess.Popen(
-                    command,
-                    cwd=projectRoot,
-                    stdin=subprocess.DEVNULL,
-                    stdout=logHandle,
-                    stderr=logHandle,
-                    creationflags=flags,
-                    env=env,
-                    close_fds=True,
-                )
-            except Exception as exc:
-                raise TTSError(f"拉不起 GPT-SoVITS 服务：{exc}") from None
-            finally:
-                if logHandle is not subprocess.DEVNULL:
-                    logHandle.close()
 
     # -------------------------------------------------------------- 各家实现
     def _edge(self, text, outPath):
@@ -636,26 +558,29 @@ class TTS:
             handle.write(audio)
 
     def _sovits(self, text, outPath):
-        """本地 GPT-SoVITS api_v2.py：GET /tts，参考音频即音色。
+        """自建 GPT-SoVITS api_v2：GET /tts，参考音频即音色。
 
-        参考音频优先用全局配置（角色固定音色），没配才退回用户上传的录音。
+        云端版只连服务、不启动它：服务地址必须由 CATGIRL_SOVITS_URL 指定。
+        参考音频走的是「服务端路径」，所以这里只校验非空、不校验本地是否存在
+        —— 推理服务很可能在另一台机器上，本地自然没有这个文件。
         """
+        # 先确认服务可用（顺带校验地址配没配），再谈参考音频，报错才指向真正的问题
+        self.ensureSovitsService()
+        baseUrl = self.sovitsBaseUrl()
+
         refPath = self.cfg.get("sovitsRefAudio") or self.profile.refPath()
-        if not refPath or not os.path.exists(refPath):
+        if not refPath:
             raise TTSError(
-                "GPT-SoVITS 需要参考音频：在 config 里配 sovitsRefAudio，"
+                "GPT-SoVITS 需要参考音频：配 sovitsRefAudio（填服务端上的路径），"
                 "或跑 python voice.py clone 你的录音.wav --text '录音里说的话'"
             )
         refText = (self.cfg.get("sovitsRefText") or self.profile.data.get("refText") or "").strip()
         refLang = self.cfg.get("sovitsRefLang") or self.profile.data.get("refLang") or "zh"
 
-        self.ensureSovitsService()
-
-        baseUrl = self.sovitsBaseUrl()
         params = {
             "text": text,
             "text_lang": self.profile.data.get("textLang") or "zh",
-            "ref_audio_path": os.path.abspath(refPath),
+            "ref_audio_path": refPath,
             "prompt_text": refText,
             "prompt_lang": refLang,
             "text_split_method": "cut5",
@@ -669,7 +594,7 @@ class TTS:
 
         url = f"{baseUrl}/tts?{urllib.parse.urlencode(params)}"
         try:
-            with _LOCAL_OPENER.open(url, timeout=180) as resp:
+            with _openerFor(baseUrl).open(url, timeout=180) as resp:
                 audio = resp.read()
         except urllib.error.HTTPError as exc:
             detail = exc.read().decode("utf-8", "replace")[:300]
@@ -677,7 +602,7 @@ class TTS:
         except urllib.error.URLError as exc:
             raise TTSError(
                 f"连不上 GPT-SoVITS（{baseUrl}）：{exc.reason}。"
-                "先双击 D:\\AI Tools\\gpt_sovits\\start_sovits.cmd"
+                "请确认那台机器的 api_v2 已启动、端口已放通"
             ) from None
         with open(outPath, "wb") as handle:
             handle.write(audio)
@@ -686,11 +611,11 @@ class TTS:
     def uploadReference(self, audioPath, refText, customName=None):
         """把参考音频注册成云端音色，返回可复用的 voice uri。
 
-        只有硅基流动需要这个步骤；本地 F5 / GPT-SoVITS 直接把参考音频
-        路径喂给推理接口就行，没有「上传」这一步。
+        只有硅基流动需要这个步骤；GPT-SoVITS 直接把参考音频路径
+        喂给推理接口就行，没有「上传」这一步。
         """
         if self.provider not in ("siliconflow",):
-            raise TTSError(f"{self.provider} 不需要上传音色，本地克隆直接用参考文件即可")
+            raise TTSError(f"{self.provider} 不需要上传音色，把参考音频路径配给推理服务即可")
 
         key = self.apiKey()
         if not key:

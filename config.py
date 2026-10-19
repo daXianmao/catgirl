@@ -1,7 +1,10 @@
-"""配置中心：本地模型和在线大模型共用一套接口，靠 provider 切换。
+"""配置中心（云端部署版）：模型一律通过在线 API 调用。
+
+和本地版最大的区别：这里没有任何本地推理相关的东西 ——
+不含 LM Studio / Ollama 预设，也不含本地语音服务的启动路径。
+所有差异都靠环境变量注入，容器化部署时一行配置都不用改代码。
 
 优先级：环境变量 > 同目录 config.json > provider 预设默认值。
-这样本地开发直接跑，上线时把密钥塞进环境变量就行，代码一行不用改。
 """
 import json
 import os
@@ -10,25 +13,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 
 # 每个预设描述一家服务商。embed 为空表示这家没有 embedding 接口，
 # 需要另外指定 CATGIRL_EMBED_* 参数，否则长期记忆会退化成纯重要度排序。
+# 云端版只保留在线服务商；本地推理（LM Studio / Ollama）见 local 分支。
 PROVIDERS = {
-    "lmstudio": {
-        "baseUrl": "http://127.0.0.1:1234/v1",
-        "model": "qwen/qwen3.8-27b",
-        "embedModel": "text-embedding-nomic-embed-text-v1.5",
-        "apiKeyEnv": "",
-        "jsonMode": "json_schema",
-        "thinkingMode": "reasoning_effort",
-        "timeout": 300,
-    },
-    "ollama": {
-        "baseUrl": "http://127.0.0.1:11434/v1",
-        "model": "qwen2.5:7b",
-        "embedModel": "nomic-embed-text",
-        "apiKeyEnv": "",
-        "jsonMode": "json_schema",
-        "thinkingMode": "none",
-        "timeout": 300,
-    },
     "openai": {
         "baseUrl": "https://api.openai.com/v1",
         "model": "gpt-4o-mini",
@@ -96,7 +82,7 @@ PROVIDERS = {
 
 DEFAULTS = {
     "name": "铃铛",
-    "provider": "lmstudio",
+    "provider": "dashscope",
     "temperature": 0.85,
     "maxTokens": 800,
     "topK": 8,
@@ -108,8 +94,9 @@ DEFAULTS = {
     "host": "0.0.0.0",
     "port": 8000,
     "serverApiKey": "",
-    # 语音：本机 GPT-SoVITS 常驻服务（9880），角色音色固定在 sovitsRefAudio
-    "ttsProvider": "gptsovits",
+    # 语音：云端版默认 Edge 在线音色（免费、免密钥、零部署），
+    # 想克隆音色就切 siliconflow / openai，靠配置切换不用改代码
+    "ttsProvider": "edge",
     "ttsVoice": "",
     "ttsModel": "",
     "ttsBaseUrl": "",
@@ -120,14 +107,11 @@ DEFAULTS = {
     "ttsFormat": "",
     "ttsRefText": "",
     "ttsAuto": False,
-    # GPT-SoVITS 常驻推理服务（跑在 D:\AI Tools\gpt_sovits\env312，不在本进程里）
-    "sovitsBaseUrl": "http://127.0.0.1:9880",
-    "sovitsAutoStart": True,
-    "sovitsPython": r"D:\AI Tools\gpt_sovits\env312\python.exe",
-    "sovitsScript": r"D:\AI Tools\gpt_sovits\GPT-SoVITS\api_v2.py",
-    "sovitsConfig": r"GPT_SoVITS/configs/tts_infer.yaml",
-    "sovitsRefAudio": r"D:\AI Tools\gpt_sovits\models\lty_ref.wav",
-    "sovitsRefText": "我现在需要一个长达三秒的语音",
+    # 可选：自建的 GPT-SoVITS HTTP 服务（跑在另一台机器上，这里只填地址）。
+    # 云端版不会去启动它，连不上就报错，不会尝试拉起本地进程。
+    "sovitsBaseUrl": "",
+    "sovitsRefAudio": "",
+    "sovitsRefText": "",
     "sovitsRefLang": "zh",
     # QQ（OneBot v11 协议端）：默认关闭，开启后由 qq.py 单独跑一个进程
     "qqEnabled": False,
@@ -241,8 +225,6 @@ def load_config(overrides=None):
         "CATGIRL_TTS_FORMAT": "ttsFormat",
         "CATGIRL_TTS_REF_TEXT": "ttsRefText",
         "CATGIRL_SOVITS_URL": "sovitsBaseUrl",
-        "CATGIRL_SOVITS_PYTHON": "sovitsPython",
-        "CATGIRL_SOVITS_SCRIPT": "sovitsScript",
         "CATGIRL_SOVITS_REF": "sovitsRefAudio",
         "CATGIRL_SOVITS_REF_TEXT": "sovitsRefText",
         "CATGIRL_QQ_WS": "qqWsUrl",
@@ -260,7 +242,6 @@ def load_config(overrides=None):
 
     cfg["disableThinking"] = _as_bool(_env("CATGIRL_DISABLE_THINKING", fileCfg.get("disableThinking")), True)
     cfg["ttsAuto"] = _as_bool(_env("CATGIRL_TTS_AUTO", fileCfg.get("ttsAuto")), False)
-    cfg["sovitsAutoStart"] = _as_bool(_env("CATGIRL_SOVITS_AUTOSTART", fileCfg.get("sovitsAutoStart")), True)
     cfg["qqEnabled"] = _as_bool(_env("CATGIRL_QQ_ENABLED", fileCfg.get("qqEnabled")), False)
     cfg["qqPrivate"] = _as_bool(_env("CATGIRL_QQ_PRIVATE", fileCfg.get("qqPrivate")), True)
     cfg["qqAtOnly"] = _as_bool(_env("CATGIRL_QQ_AT_ONLY", fileCfg.get("qqAtOnly")), True)
