@@ -12,7 +12,8 @@
 
 记忆隔离策略：
   - 私聊：每人一个记忆库（users/qq<QQ号>/），她记得和这个人说过什么
-  - 群聊：每群一个记忆库（users/qqg<群号>/），她记得这个群的氛围
+  - 群聊：同样按「说话人」建库（users/qq<QQ号>/），与私聊记忆统一到同一个人；
+    短期会话仍按群区分（session=g<群号>），避免群里的话污染私聊上下文
 群消息会带上「说话人昵称：」，这样她能分清是谁在说。
 """
 import argparse
@@ -150,11 +151,15 @@ class QQBot:
 
     # ------------------------------------------------------------ 会话与模型
     def session_for(self, kind, chatId, event):
-        """私聊按人、群聊按群，各自一个独立记忆库。"""
+        """私聊、群聊都按「说话人」建库，记忆统一到个人。
+        短期会话仍区分私聊/群聊（session 不同），避免群里的话污染私聊上下文。"""
         if kind == "group":
-            userId, sessionId = f"qqg{chatId}", f"g{chatId}"
+            sender = str(event.get("user_id") or "").strip()
+            userId = f"qq{sender}" if sender else f"qqg{chatId}"
+            sessionId = f"g{chatId}"
         else:
-            userId, sessionId = f"qq{chatId}", f"p{chatId}"
+            userId = f"qq{chatId}"
+            sessionId = f"p{chatId}"
 
         existing = self.sessions.get(userId)
         if existing:
