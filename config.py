@@ -120,15 +120,20 @@ DEFAULTS = {
     "ttsFormat": "",
     "ttsRefText": "",
     "ttsAuto": False,
-    # GPT-SoVITS 常驻推理服务（跑在 D:\AI Tools\gpt_sovits\env312，不在本进程里）
+    # GPT-SoVITS 常驻推理服务：装在项目外，靠 HTTP 调用，要用时自动拉起。
+    # 下面 python / script / 参考音频都没有默认值，得按自己机器上的安装位置填
+    # （写进 config.json 或设 CATGIRL_SOVITS_* 环境变量）。
     "sovitsBaseUrl": "http://127.0.0.1:9880",
     "sovitsAutoStart": True,
-    "sovitsPython": r"D:\AI Tools\gpt_sovits\env312\python.exe",
-    "sovitsScript": r"D:\AI Tools\gpt_sovits\GPT-SoVITS\api_v2.py",
-    "sovitsConfig": r"GPT_SoVITS/configs/tts_infer.yaml",
-    "sovitsRefAudio": r"D:\AI Tools\gpt_sovits\models\lty_ref.wav",
-    "sovitsRefText": "我现在需要一个长达三秒的语音",
+    "sovitsPython": "",
+    "sovitsScript": "",
+    "sovitsConfig": "GPT_SoVITS/configs/tts_infer.yaml",
+    "sovitsRefAudio": "",
+    "sovitsRefText": "",
     "sovitsRefLang": "zh",
+    # api_v2 运行时依赖的额外目录；留空则用系统环境里已有的
+    "sovitsFfmpegDir": "",
+    "sovitsNltkData": "",
     # QQ（OneBot v11 协议端）：默认关闭，开启后由 qq.py 单独跑一个进程
     "qqEnabled": False,
     "qqWsUrl": "ws://127.0.0.1:3001",
@@ -245,6 +250,8 @@ def load_config(overrides=None):
         "CATGIRL_SOVITS_SCRIPT": "sovitsScript",
         "CATGIRL_SOVITS_REF": "sovitsRefAudio",
         "CATGIRL_SOVITS_REF_TEXT": "sovitsRefText",
+        "CATGIRL_SOVITS_FFMPEG": "sovitsFfmpegDir",
+        "CATGIRL_SOVITS_NLTK": "sovitsNltkData",
         "CATGIRL_QQ_WS": "qqWsUrl",
         "CATGIRL_QQ_TOKEN": "qqToken",
         "CATGIRL_QQ_PROXY": "qqProxy",

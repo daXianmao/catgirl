@@ -24,7 +24,7 @@ web/index.html 内置聊天页面
 ## 一、本地跑起来
 
 ```bash
-cd "D:/AI Tools/catgirl"
+cd catgirl
 python catgirl.py
 ```
 
@@ -191,11 +191,12 @@ print(res.json()["reply"])
 |---|---|---|---|
 | `edge` | ❌ 只能选预设音色 | 免费 | 服务器能访问微软 TTS |
 | `siliconflow` | ✅ 10 秒录音零样本克隆 | 按字符计费，很便宜 | API Key + **账号实名认证** |
-| `gptsovits` | ✅ 完全离线克隆，最像，32kHz 更亮 | 电费 | 本机跑 `D:\AI Tools\gpt_sovits` 的 api_v2（加载约 40 秒） |
+| `gptsovits` | ✅ 完全离线克隆，最像，32kHz 更亮 | 电费 | 本机跑 GPT-SoVITS 的 api_v2（加载约 40 秒） |
 
-> 本机现在默认就是 `gptsovits`：角色参考音频由 `config.json` 的 `sovitsRefAudio` 指定
-> （`D:\AI Tools\gpt_sovits\models\lty_ref.wav`），逐字稿在 `sovitsRefText`。
-> 服务没起时猫娘会自动拉起 api_v2（首次约 40 秒）。
+> `gptsovits` 需要你在 `config.json` 里指明 GPT-SoVITS 装在哪：
+> `sovitsPython`（它那个环境的 python 解释器）、`sovitsScript`（`api_v2.py` 的路径）、
+> `sovitsRefAudio`（角色参考音频）、`sovitsRefText`（参考音频的逐字稿，必须一字不差）。
+> 这四项都没有默认值，因为路径只能因机器而异。填好之后服务没起时猫娘会自动拉起 api_v2。
 
 ### 选音色（立即可用）
 
@@ -227,13 +228,27 @@ python voice.py say "主人，听得到吗" --play
 
 ### 本机（GPT-SoVITS，默认在用）
 
-GPT-SoVITS 跑在独立环境（`D:\AI Tools\gpt_sovits\env312`，ROCm 版 torch），
-用官方 `api_v2.py` 做成常驻 HTTP 服务，猫娘通过 `http://127.0.0.1:9880` 调它——
-1.4GB 模型只加载一次，之后每句话直接合成（32kHz，一句约 5~10 秒）。
+GPT-SoVITS 是个独立项目，自带 python 环境和 torch，所以它不在猫娘的 `.venv` 里，
+而是先用官方 `api_v2.py` 做成常驻 HTTP 服务，猫娘再通过 `http://127.0.0.1:9880` 调它——
+模型只加载一次，之后每句话直接合成（32kHz，一句约 5~10 秒）。
+
+先让猫娘知道它装在哪，编辑 `config.json`：
+
+```json
+{
+  "sovitsPython": "D:\\你的路径\\GPT-SoVITS\\env\\python.exe",
+  "sovitsScript": "D:\\你的路径\\GPT-SoVITS\\api_v2.py",
+  "sovitsRefAudio": "D:\\你的路径\\GPT-SoVITS\\参考音频.wav",
+  "sovitsRefText": "参考音频里逐字对应的原话"
+}
+```
+
+`config.json` 里的反斜杠要写成 `\\`。也可以用环境变量
+`CATGIRL_SOVITS_PYTHON` / `CATGIRL_SOVITS_SCRIPT` / `CATGIRL_SOVITS_REF` / `CATGIRL_SOVITS_REF_TEXT`。
 
 ```bash
-# 手动起（可选，猫娘也会自己拉；首次加载约 40 秒）
-双击 D:\AI Tools\gpt_sovits\start_sovits.cmd
+# 手动起（可选，填好上面几项后猫娘也会自己拉；首次加载约 40 秒）
+python api_v2.py -a 127.0.0.1 -p 9880 -c GPT_SoVITS/configs/tts_infer.yaml
 
 # 换参考音色
 python voice.py clone 我的录音.wav --text "录音里逐字对应的原话" --provider gptsovits
@@ -245,11 +260,16 @@ python voice.py say "主人，听得到吗" --play
 
 | 键 | 默认 | 说明 |
 |---|---|---|
-| `sovitsRefAudio` | `...\models\lty_ref.wav` | 角色参考音频，换它就换声音 |
-| `sovitsRefText` | 见 config | 参考音频里逐字对应的原话，必须一致 |
+| `sovitsPython` | 空（必填） | GPT-SoVITS 环境的 python 解释器 |
+| `sovitsScript` | 空（必填） | `api_v2.py` 的绝对路径 |
+| `sovitsRefAudio` | 空（必填） | 角色参考音频，换它就换声音 |
+| `sovitsRefText` | 空 | 参考音频里逐字对应的原话，必须一致 |
 | `sovitsRefLang` | zh | 参考音频语种 |
 | `sovitsAutoStart` | true | 服务没起时自动拉起来 |
 | `sovitsBaseUrl` | `http://127.0.0.1:9880` | 换机器/换端口时改这里 |
+| `sovitsConfig` | `GPT_SoVITS/configs/tts_infer.yaml` | 相对项目根，一般不用改 |
+| `sovitsFfmpegDir` | 空 | api_v2 用到的 ffmpeg 目录，留空则用系统 PATH |
+| `sovitsNltkData` | 空 | NLTK 数据目录，留空则用系统环境变量 |
 
 ### 云端 / 其它本地后端
 

@@ -277,14 +277,12 @@ def _open(url, payload=None, headers=None, method=None):
 
 
 # ------------------------------------------------------- 本地常驻语音服务（SoVITS）
-# GPT-SoVITS 跑在独立环境（D:\AI Tools\gpt_sovits\env312，带 ROCm 版 torch），
-# 不在猫娘的 .venv 里，所以只能通过 HTTP 找它；第一次用到时如果没起，就顺手拉起来。
+# GPT-SoVITS 是个独立项目，自带环境和 torch，不在猫娘的 .venv 里，
+# 所以只能通过 HTTP 找它；第一次用到时按 config 里填的路径顺手拉起来。
 SOVITS_DEFAULT_URL = "http://127.0.0.1:9880"
-SOVITS_DEFAULT_PYTHON = r"D:\AI Tools\gpt_sovits\env312\python.exe"
-SOVITS_DEFAULT_SCRIPT = r"D:\AI Tools\gpt_sovits\GPT-SoVITS\api_v2.py"
 SOVITS_DEFAULT_CONFIG = r"GPT_SoVITS/configs/tts_infer.yaml"
 SOVITS_SPAWN_COOLDOWN = 30  # 秒：拉过就别反复拉，避免刷一堆进程
-SOVITS_PORT_GRACE = 90      # 秒：要加载 1.4G 模型，比 F5 慢，端口迟迟不通才判死
+SOVITS_PORT_GRACE = 90      # 秒：要加载 1.4G 模型，端口迟迟不通才判死
 
 _sovitsServiceLock = threading.Lock()
 _sovitsLastSpawn = 0.0
@@ -485,7 +483,7 @@ class TTS:
         autoStart = True if autoStart is None else bool(autoStart)
         if not autoStart:
             raise TTSError(
-                f"GPT-SoVITS 没在跑（{baseUrl}）。先双击 D:\\AI Tools\\gpt_sovits\\start_sovits.cmd，"
+                f"GPT-SoVITS 没在跑（{baseUrl}）。先把它的 api_v2.py 启动起来，"
                 "或把 sovitsAutoStart 设成 true 让它自动拉起"
             )
         self._spawnSovits(baseUrl)
@@ -500,24 +498,31 @@ class TTS:
             if spawned and time.time() > graceEnd:
                 raise TTSError(
                     f"GPT-SoVITS 没起来（{baseUrl} 端口不通），"
-                    "看 D:\\AI Tools\\gpt_sovits\\api_v2.log 里的报错"
+                    "看它项目根目录下的 api_v2.log 里的报错"
                 )
             time.sleep(2)
         raise TTSError(
-            f"等了 {wait} 秒 GPT-SoVITS 还没就绪，看看 D:\\AI Tools\\gpt_sovits\\api_v2.log"
+            f"等了 {wait} 秒 GPT-SoVITS 还没就绪，看看它项目根目录下 api_v2.log 的报错"
         )
 
     def _spawnSovits(self, baseUrl):
         """后台拉起 api_v2。失败只记日志，交给上层轮询时报错。"""
         global _sovitsLastSpawn
-        script = self.cfg.get("sovitsScript") or SOVITS_DEFAULT_SCRIPT
-        python = self.cfg.get("sovitsPython") or SOVITS_DEFAULT_PYTHON
+        script = str(self.cfg.get("sovitsScript") or "").strip()
+        python = str(self.cfg.get("sovitsPython") or "").strip()
         config = self.cfg.get("sovitsConfig") or SOVITS_DEFAULT_CONFIG
 
+        if not script or not python:
+            raise TTSError(
+                "要自动拉起 GPT-SoVITS，得先告诉猫娘它装在哪：在 config.json 里填 "
+                "sovitsPython（该环境的 python 解释器）和 sovitsScript（api_v2.py 的路径），"
+                "或设环境变量 CATGIRL_SOVITS_PYTHON / CATGIRL_SOVITS_SCRIPT。"
+                "不想自动拉起就把 sovitsAutoStart 设成 false，自己先把服务跑起来。"
+            )
         if not os.path.exists(script) or not os.path.exists(python):
             raise TTSError(
-                f"找不到 GPT-SoVITS 服务文件（脚本 {script} / Python {python}），"
-                "先按 D:\\AI Tools\\gpt_sovits\\README.md 装好"
+                f"GPT-SoVITS 服务文件对不上：脚本 {script}，解释器 {python}。"
+                "检查 sovitsScript / sovitsPython 是否指向真实存在的文件。"
             )
 
         with _sovitsServiceLock:
@@ -530,11 +535,21 @@ class TTS:
             host = parsed.hostname or "127.0.0.1"
             command = [python, script, "-a", host, "-p", str(port), "-c", config]
 
-            # api_v2 依赖 NLTK 数据与 ffmpeg，且必须在项目根启动（配置里是相对路径）
+            # api_v2 依赖 NLTK 数据与 ffmpeg；没配就沿用系统环境里已有的
             env = dict(os.environ)
             env["PYTHONIOENCODING"] = "utf-8"
-            env["NLTK_DATA"] = env.get("NLTK_DATA") or r"D:\AI Tools\nltk_data"
-            env["PATH"] = r"D:\AI Tools\ffmpeg;D:\AI Tools\ffmpeg\bin;" + env.get("PATH", "")
+            nltkData = str(self.cfg.get("sovitsNltkData") or "").strip()
+            if nltkData:
+                env["NLTK_DATA"] = env.get("NLTK_DATA") or nltkData
+            ffmpegDir = str(self.cfg.get("sovitsFfmpegDir") or "").strip()
+            if ffmpegDir:
+                env["PATH"] = (
+                    ffmpegDir
+                    + os.pathsep
+                    + os.path.join(ffmpegDir, "bin")
+                    + os.pathsep
+                    + env.get("PATH", "")
+                )
 
             flags = 0
             if os.name == "nt":
@@ -677,7 +692,7 @@ class TTS:
         except urllib.error.URLError as exc:
             raise TTSError(
                 f"连不上 GPT-SoVITS（{baseUrl}）：{exc.reason}。"
-                "先双击 D:\\AI Tools\\gpt_sovits\\start_sovits.cmd"
+                "先把它的 api_v2.py 启动起来，或检查 sovitsBaseUrl 是否写对"
             ) from None
         with open(outPath, "wb") as handle:
             handle.write(audio)
