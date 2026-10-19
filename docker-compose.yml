@@ -40,6 +40,14 @@ services:
     restart: unless-stopped
     command: ["python", "qq.py"]
     profiles: ["qq"]
+    # 必须覆盖 Dockerfile 里的健康检查：qq.py 不开 HTTP 端口，
+    # 沿用那条 8000/healthz 检查必然失败，进程明明活着也会被判 unhealthy
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f 'python qq.py' > /dev/null || exit 1"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
     depends_on:
       - napcat
     environment:
