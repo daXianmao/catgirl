@@ -63,7 +63,7 @@ class TailBuffer:
 class CatgirlCore:
     def __init__(self, cfg, dbPath=None, personaPath=None, session=None):
         self.cfg = cfg
-        self.name = cfg.get("name", "铃铛")
+        self.name = cfg.get("name", "铃洛")
         self.session = session or f"s{int(time.time() * 1000)}"
         self.personaPath = personaPath or os.path.join(BASE_DIR, "persona.md")
         self.persona = self._load_persona()

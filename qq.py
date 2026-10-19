@@ -134,6 +134,7 @@ class QQBot:
         self.atOnly = bool(cfg.get("qqAtOnly"))
         self.voiceOn = bool(cfg.get("qqVoice"))
         self.showName = bool(cfg.get("qqNickname"))
+        self.ownerQq = str(cfg.get("ownerQq") or "").strip()
         self.rate = float(cfg.get("qqRate") or 1.5)
         self.maxChars = int(cfg.get("qqMaxChars") or 400)
 
@@ -315,7 +316,11 @@ class QQBot:
             return
 
         if self.showName and kind == "group":
-            userText = f"{sender_name(event)}：{text}"
+            sender = sender_name(event)
+            if self.ownerQq and uin == self.ownerQq:
+                userText = f"主人（{sender}）：{text}"
+            else:
+                userText = f"{sender}：{text}"
         else:
             userText = text
 

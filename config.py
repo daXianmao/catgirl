@@ -81,7 +81,7 @@ PROVIDERS = {
 }
 
 DEFAULTS = {
-    "name": "铃铛",
+    "name": "铃洛",
     "provider": "dashscope",
     "temperature": 0.85,
     "maxTokens": 800,
@@ -126,6 +126,7 @@ DEFAULTS = {
     "qqMaxChars": 400,
     "qqVoice": False,
     "qqNickname": True,
+    "ownerQq": "",
 }
 
 
@@ -234,6 +235,7 @@ def load_config(overrides=None):
         "CATGIRL_QQ_GROUPS": "qqGroups",
         "CATGIRL_QQ_RATE": "qqRate",
         "CATGIRL_QQ_MAX_CHARS": "qqMaxChars",
+        "CATGIRL_OWNER_QQ": "ownerQq",
     }
     for envName, key in envMap.items():
         value = _env(envName)
