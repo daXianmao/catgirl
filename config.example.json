@@ -3,6 +3,9 @@
   "provider": "dashscope",
   "ttsProvider": "edge",
   "ttsVoice": "zh-CN-XiaoyiNeural",
+  "sovitsBaseUrl": "",
+  "sovitsRefAudio": "",
+  "sovitsRefText": "",
   "qqEnabled": false,
   "qqWsUrl": "ws://127.0.0.1:3001"
 }
