@@ -1,0 +1,6 @@
+fastapi>=0.115,<1.0
+uvicorn[standard]>=0.30,<1.0
+python-multipart>=0.0.9
+edge-tts>=7.0,<8.0
+# QQ 适配器用（OneBot v11 WebSocket）；uvicorn[standard] 已经带了，显式列出更保险
+websockets>=13,<18

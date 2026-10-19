@@ -1,0 +1,86 @@
+services:
+  catgirl:
+    build: .
+    image: catgirl:2.0
+    container_name: catgirl
+    restart: unless-stopped
+    ports:
+      - "8000:8000"
+    environment:
+      # 换 provider 即可切换服务商，密钥从同目录 .env 读
+      CATGIRL_PROVIDER: ${CATGIRL_PROVIDER:-dashscope}
+      CATGIRL_API_KEY: ${CATGIRL_API_KEY:-}
+      CATGIRL_MODEL: ${CATGIRL_MODEL:-}
+      CATGIRL_EMBED_BASE_URL: ${CATGIRL_EMBED_BASE_URL:-}
+      CATGIRL_EMBED_API_KEY: ${CATGIRL_EMBED_API_KEY:-}
+      CATGIRL_EMBED_MODEL: ${CATGIRL_EMBED_MODEL:-}
+      # 对外接口密钥，强烈建议设置
+      CATGIRL_SERVER_KEY: ${CATGIRL_SERVER_KEY:-}
+      CATGIRL_DATA: /data
+      CATGIRL_NAME: ${CATGIRL_NAME:-铃铛}
+      # 语音
+      CATGIRL_TTS_PROVIDER: ${CATGIRL_TTS_PROVIDER:-edge}
+      CATGIRL_TTS_KEY: ${CATGIRL_TTS_KEY:-}
+      CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
+    volumes:
+      - catgirl_data:/data
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
+      interval: 30s
+      timeout: 3s
+      retries: 3
+
+  # QQ 适配器：独立进程，与上面的 Web 服务共用同一份记忆库
+  # 不想接 QQ 就 `docker compose up -d catgirl`，别启这个
+  qq:
+    build: .
+    image: catgirl:2.0
+    container_name: catgirl-qq
+    restart: unless-stopped
+    command: ["python", "qq.py"]
+    profiles: ["qq"]
+    depends_on:
+      - napcat
+    environment:
+      CATGIRL_PROVIDER: ${CATGIRL_PROVIDER:-dashscope}
+      CATGIRL_API_KEY: ${CATGIRL_API_KEY:-}
+      CATGIRL_MODEL: ${CATGIRL_MODEL:-}
+      CATGIRL_EMBED_BASE_URL: ${CATGIRL_EMBED_BASE_URL:-}
+      CATGIRL_EMBED_API_KEY: ${CATGIRL_EMBED_API_KEY:-}
+      CATGIRL_EMBED_MODEL: ${CATGIRL_EMBED_MODEL:-}
+      CATGIRL_NAME: ${CATGIRL_NAME:-铃铛}
+      CATGIRL_DATA: /data
+      CATGIRL_TTS_PROVIDER: ${CATGIRL_TTS_PROVIDER:-edge}
+      CATGIRL_TTS_KEY: ${CATGIRL_TTS_KEY:-}
+      CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
+      # 指向同一网络里的 NapCat
+      CATGIRL_QQ_ENABLED: "true"
+      CATGIRL_QQ_WS: ws://napcat:3001
+      CATGIRL_QQ_TOKEN: ${CATGIRL_QQ_TOKEN:-}
+      CATGIRL_QQ_GROUPS: ${CATGIRL_QQ_GROUPS:-}
+      CATGIRL_QQ_PRIVATE: ${CATGIRL_QQ_PRIVATE:-true}
+      CATGIRL_QQ_AT_ONLY: ${CATGIRL_QQ_AT_ONLY:-true}
+      CATGIRL_QQ_VOICE: ${CATGIRL_QQ_VOICE:-false}
+      CATGIRL_QQ_MAX_CHARS: ${CATGIRL_QQ_MAX_CHARS:-400}
+    volumes:
+      - catgirl_data:/data
+
+  # QQ 协议端（非官方实现）。首次启动看日志里的 WebUI 地址和 token，扫码登录。
+  napcat:
+    image: mlikiowa/napcat-docker:latest
+    container_name: napcat
+    restart: unless-stopped
+    profiles: ["qq"]
+    environment:
+      NAPCAT_UID: ${NAPCAT_UID:-1000}
+      NAPCAT_GID: ${NAPCAT_GID:-1000}
+    ports:
+      - "6099:6099"   # WebUI：扫码登录 + 配置 OneBot 服务
+    volumes:
+      - ./napcat/config:/app/napcat/config
+      - ./napcat/qq:/app/.config/QQ
+      - catgirl_data:/data:ro   # 只读挂载，发语音时协议端要能读到音频文件
+    shm_size: 256m
+
+volumes:
+  catgirl_data:

@@ -1,0 +1,18 @@
+# ---- Python ----
+__pycache__/
+*.py[cod]
+.venv/
+venv/
+
+# ---- 运行数据 ----
+# 记忆库、用户音色、生成的音频都在这里，属个人数据不进版本库
+data/
+
+# ---- 本地配置与密钥 ----
+# config.json 记录的是「这台机器」的路径和音色，换机器就得改，所以不跟踪
+# 新机器请从 config.example.json 复制
+config.json
+.env
+
+# ---- 日志 ----
+*.log

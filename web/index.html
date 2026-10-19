@@ -1,0 +1,500 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>AI 猫娘</title>
+<style>
+  :root {
+    --bg: #faf8f5;
+    --panel: #ffffff;
+    --ink: #2c2c2a;
+    --muted: #7a7670;
+    --line: #e7e2da;
+    --accent: #c0653f;
+    --accent-soft: #f7ece6;
+    --bubble: #f2efe9;
+  }
+  * { box-sizing: border-box; }
+  html, body { height: 100%; margin: 0; }
+  body {
+    background: var(--bg);
+    color: var(--ink);
+    font: 400 15px/1.7 system-ui, "PingFang SC", "Microsoft YaHei", sans-serif;
+    display: flex;
+    justify-content: center;
+  }
+  .app {
+    width: 100%;
+    max-width: 820px;
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    padding: 0 16px;
+  }
+  header {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding: 14px 4px;
+    border-bottom: 1px solid var(--line);
+  }
+  .avatar {
+    width: 34px; height: 34px;
+    border-radius: 50%;
+    background: var(--accent-soft);
+    color: var(--accent);
+    display: grid; place-items: center;
+    font-weight: 500; font-size: 15px;
+  }
+  .who { flex: 1; min-width: 0; }
+  .who b { font-weight: 500; font-size: 15px; }
+  .who span { display: block; color: var(--muted); font-size: 12px; }
+  .meter { display: flex; align-items: center; gap: 8px; font-size: 12px; color: var(--muted); }
+  .bar { width: 76px; height: 4px; border-radius: 2px; background: var(--line); overflow: hidden; }
+  .bar i { display: block; height: 100%; background: var(--accent); width: 30%; }
+  .icon-btn {
+    border: 1px solid var(--line);
+    background: var(--panel);
+    color: var(--muted);
+    border-radius: 8px;
+    padding: 5px 10px;
+    font-size: 12px;
+    cursor: pointer;
+  }
+  .icon-btn:hover { color: var(--ink); border-color: #d5cec3; }
+  main {
+    flex: 1;
+    overflow-y: auto;
+    padding: 22px 4px 10px;
+    display: flex;
+    flex-direction: column;
+    gap: 16px;
+  }
+  .msg { display: flex; gap: 10px; max-width: 92%; }
+  .msg .text {
+    padding: 10px 14px;
+    border-radius: 14px;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+  .msg.her .text { background: var(--panel); border: 1px solid var(--line); border-top-left-radius: 4px; }
+  .msg.me { align-self: flex-end; flex-direction: row-reverse; }
+  .msg.me .text { background: var(--accent-soft); border-top-right-radius: 4px; }
+  .dice { width: 26px; height: 26px; border-radius: 50%; flex: none; display: grid; place-items: center; font-size: 12px; }
+  .msg.her .dice { background: var(--accent-soft); color: var(--accent); }
+  .msg.me .dice { background: var(--bubble); color: var(--muted); }
+  .notice { font-size: 12px; color: var(--muted); padding-left: 36px; }
+  .notice em { font-style: normal; color: var(--accent); }
+  .hint { color: var(--muted); font-size: 13px; text-align: center; padding: 40px 20px; line-height: 1.9; }
+  footer { border-top: 1px solid var(--line); padding: 12px 4px 16px; }
+  .input-row { display: flex; gap: 10px; align-items: flex-end; }
+  textarea {
+    flex: 1;
+    resize: none;
+    border: 1px solid var(--line);
+    border-radius: 12px;
+    padding: 10px 14px;
+    font: inherit;
+    background: var(--panel);
+    color: var(--ink);
+    max-height: 140px;
+    outline: none;
+  }
+  textarea:focus { border-color: #d9bfae; }
+  .send {
+    border: none;
+    background: var(--accent);
+    color: #fff;
+    border-radius: 12px;
+    padding: 0 18px;
+    height: 42px;
+    font: inherit;
+    font-weight: 500;
+    cursor: pointer;
+  }
+  .send:disabled { opacity: .45; cursor: default; }
+  .panel {
+    display: none;
+    border-top: 1px solid var(--line);
+    padding: 12px 4px;
+    max-height: 240px;
+    overflow-y: auto;
+    font-size: 13px;
+  }
+  .panel.open { display: block; }
+  .panel label { display: block; color: var(--muted); font-size: 12px; margin: 10px 0 4px; }
+  .panel input, .panel select {
+    width: 100%;
+    padding: 8px 10px;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    font: inherit;
+    font-size: 13px;
+    background: var(--panel);
+    color: var(--ink);
+  }
+  .row { display: flex; gap: 8px; align-items: center; }
+  .row select { flex: 1; }
+  .sub { color: var(--muted); font-size: 12px; margin-top: 6px; line-height: 1.6; }
+  .mem { padding: 6px 0; border-bottom: 1px dashed var(--line); display: flex; gap: 8px; }
+  .mem small { color: var(--muted); flex: none; }
+  .err { color: #a32d2d; font-size: 13px; padding: 6px 0; }
+</style>
+</head>
+<body>
+<div class="app">
+  <header>
+    <div class="avatar" id="avatar">铃</div>
+    <div class="who">
+      <b id="name">猫娘</b>
+      <span id="meta">连接中…</span>
+    </div>
+    <div class="meter">
+      <div class="bar"><i id="affBar" style="width:30%"></i></div>
+      <span id="aff">30</span>
+    </div>
+    <button class="icon-btn" id="ttsBtn">语音 关</button>
+    <button class="icon-btn" id="memBtn">记忆</button>
+    <button class="icon-btn" id="resetBtn">新会话</button>
+  </header>
+
+  <div class="panel" id="panel">
+    <label>用户标识（每个用户独立记忆库）</label>
+    <input id="userInput" placeholder="default">
+    <label>接口密钥（服务端设了 CATGIRL_SERVER_KEY 才需要填）</label>
+    <input id="keyInput" type="password" placeholder="留空表示不校验">
+    <div style="margin-top:12px;color:var(--muted);font-size:12px">长期记忆</div>
+    <div id="memList"></div>
+
+    <div style="margin-top:16px;color:var(--muted);font-size:12px">音色</div>
+    <div class="row" style="margin-top:6px">
+      <select id="voiceSel"></select>
+      <button class="icon-btn" id="voiceApply">应用</button>
+      <button class="icon-btn" id="voiceTry">试听</button>
+    </div>
+    <div class="sub" id="voiceHint">读取中…</div>
+
+    <label>克隆音色（5~15 秒干净人声，无背景音乐）</label>
+    <input id="refFile" type="file" accept="audio/*">
+    <input id="refText" placeholder="这段录音里逐字对应的原话" style="margin-top:6px">
+    <button class="icon-btn" id="cloneBtn" style="margin-top:8px">上传并克隆</button>
+    <div class="sub" id="cloneHint"></div>
+  </div>
+
+  <main id="log">
+    <div class="hint" id="hint">跟她说点什么吧<br><span style="font-size:12px">她会记住你说过的事，下次还能想起来</span></div>
+  </main>
+
+  <footer>
+    <div class="input-row">
+      <textarea id="input" rows="1" placeholder="说点什么…（Enter 发送，Shift+Enter 换行）"></textarea>
+      <button class="send" id="send">发送</button>
+    </div>
+  </footer>
+</div>
+
+<script>
+const $ = (id) => document.getElementById(id);
+const state = {
+  userId: localStorage.getItem("catgirl_user") || "default",
+  apiKey: localStorage.getItem("catgirl_key") || "",
+  audio: localStorage.getItem("catgirl_audio") === "1",
+  busy: false,
+};
+
+function syncTtsBtn() {
+  $("ttsBtn").textContent = state.audio ? "语音 开" : "语音 关";
+  $("ttsBtn").style.color = state.audio ? "var(--accent)" : "";
+  $("ttsBtn").style.borderColor = state.audio ? "#e3c3b2" : "";
+}
+
+function playBlob(blob) {
+  const audio = new Audio(URL.createObjectURL(blob));
+  audio.onended = () => URL.revokeObjectURL(audio.src);
+  audio.play().catch(() => note("浏览器拦了自动播放，点一下页面再试"));
+}
+
+async function playAudioUrl(url) {
+  try {
+    const res = await fetch(url, { headers: headers() });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    playBlob(await res.blob());
+  } catch (err) {
+    note("语音取不到：" + err.message);
+  }
+}
+
+async function loadVoice() {
+  try {
+    const res = await fetch("/api/voice", { headers: headers() });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    const data = await res.json();
+    const sel = $("voiceSel");
+    sel.innerHTML = "";
+    for (const item of data.voices || []) {
+      const opt = document.createElement("option");
+      opt.value = item.id;
+      opt.textContent = item.id + " · " + item.desc;
+      if (item.id === data.profile.voice) opt.selected = true;
+      sel.append(opt);
+    }
+    const info = (data.providers || {})[data.profile.provider] || {};
+    const bits = [info.label || data.profile.provider];
+    if (info.hint) bits.push(info.hint);
+    if (data.profile.refReady) bits.push("参考音频已就绪");
+    $("voiceHint").textContent = bits.join(" · ");
+  } catch (err) {
+    $("voiceHint").textContent = "读取音色失败：" + err.message;
+  }
+}
+
+function headers() {
+  const h = { "Content-Type": "application/json", "X-User-Id": state.userId };
+  if (state.apiKey) h["Authorization"] = "Bearer " + state.apiKey;
+  return h;
+}
+
+function bubble(role, text) {
+  const wrap = document.createElement("div");
+  wrap.className = "msg " + (role === "user" ? "me" : "her");
+  const dice = document.createElement("div");
+  dice.className = "dice";
+  dice.textContent = role === "user" ? "你" : "铃";
+  const body = document.createElement("div");
+  body.className = "text";
+  body.textContent = text;
+  wrap.append(dice, body);
+  $("log").append(wrap);
+  $("log").scrollTop = $("log").scrollHeight;
+  return body;
+}
+
+function note(text) {
+  const line = document.createElement("div");
+  line.className = "notice";
+  line.innerHTML = "<em>·</em> " + text;
+  $("log").append(line);
+  $("log").scrollTop = $("log").scrollHeight;
+}
+
+function setProfile(p) {
+  $("name").textContent = p.name || "猫娘";
+  $("avatar").textContent = (p.name || "铃")[0];
+  const model = p.model ? p.model.split("/").pop() : "";
+  $("meta").textContent = [p.provider, model, "记忆 " + (p.memories || 0) + " 条"].filter(Boolean).join(" · ");
+  $("aff").textContent = p.affinity ?? 30;
+  $("affBar").style.width = Math.max(0, Math.min(100, p.affinity ?? 30)) + "%";
+  if (p.gap) document.title = (p.name || "猫娘") + " · " + p.mood;
+}
+
+async function refresh() {
+  try {
+    const res = await fetch("/api/profile", { headers: headers() });
+    if (!res.ok) throw new Error("HTTP " + res.status);
+    setProfile(await res.json());
+  } catch (err) {
+    $("meta").textContent = "连不上服务：" + err.message;
+  }
+}
+
+async function loadMemories() {
+  const box = $("memList");
+  box.innerHTML = "<div style='color:var(--muted);font-size:12px'>加载中…</div>";
+  try {
+    const res = await fetch("/api/memories?limit=50", { headers: headers() });
+    const data = await res.json();
+    if (!data.memories || !data.memories.length) {
+      box.innerHTML = "<div style='color:var(--muted);font-size:12px;padding:8px 0'>还没有记忆</div>";
+      return;
+    }
+    box.innerHTML = "";
+    for (const m of data.memories) {
+      const row = document.createElement("div");
+      row.className = "mem";
+      row.innerHTML = "<small>" + m.kind + " · " + Math.round(m.importance) + "</small><span></span>";
+      row.querySelector("span").textContent = m.content;
+      box.append(row);
+    }
+  } catch (err) {
+    box.innerHTML = "<div class='err'>读取失败：" + err.message + "</div>";
+  }
+}
+
+async function send() {
+  const text = $("input").value.trim();
+  if (!text || state.busy) return;
+  state.busy = true;
+  $("send").disabled = true;
+  $("input").value = "";
+  $("input").style.height = "auto";
+  $("hint")?.remove();
+
+  bubble("user", text);
+  const target = bubble("assistant", "");
+
+  try {
+    const res = await fetch("/api/chat/stream", {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ message: text, stream: true, audio: state.audio }),
+    });
+    if (!res.ok || !res.body) {
+      const detail = await res.text();
+      throw new Error(res.status + " " + detail.slice(0, 120));
+    }
+
+    const reader = res.body.getReader();
+    const decoder = new TextDecoder("utf-8");
+    let buffer = "";
+
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) break;
+      buffer += decoder.decode(value, { stream: true });
+      const frames = buffer.split("\n\n");
+      buffer = frames.pop();
+      for (const frame of frames) {
+        const line = frame.trim();
+        if (!line.startsWith("data:")) continue;
+        const payload = line.slice(5).trim();
+        if (payload === "[DONE]") continue;
+        let event;
+        try { event = JSON.parse(payload); } catch { continue; }
+
+        if (event.type === "delta") {
+          target.textContent += event.text;
+          $("log").scrollTop = $("log").scrollHeight;
+        } else if (event.type === "meta") {
+          if (event.mood) $("meta").textContent = $("meta").textContent.replace(/心情.*$/, "") + "· 心情 " + event.mood;
+          if (event.affinity != null) {
+            $("aff").textContent = event.affinity;
+            $("affBar").style.width = Math.max(0, Math.min(100, event.affinity)) + "%";
+          }
+          (event.notices || []).forEach(note);
+          if (event.audioUrl) playAudioUrl(event.audioUrl);
+          if (event.audioError) note("语音合成失败：" + event.audioError);
+          refresh();
+        } else if (event.type === "error") {
+          note("出错了：" + event.message);
+        }
+      }
+    }
+  } catch (err) {
+    target.textContent = "";
+    note("请求失败：" + err.message);
+  } finally {
+    state.busy = false;
+    $("send").disabled = false;
+    $("input").focus();
+  }
+}
+
+$("send").onclick = send;
+$("input").addEventListener("keydown", (e) => {
+  if (e.key === "Enter" && !e.shiftKey) {
+    e.preventDefault();
+    send();
+  }
+});
+$("input").addEventListener("input", () => {
+  const el = $("input");
+  el.style.height = "auto";
+  el.style.height = Math.min(140, el.scrollHeight) + "px";
+});
+
+$("memBtn").onclick = () => {
+  $("panel").classList.toggle("open");
+  if ($("panel").classList.contains("open")) {
+    loadMemories();
+    loadVoice();
+  }
+};
+
+$("ttsBtn").onclick = () => {
+  state.audio = !state.audio;
+  localStorage.setItem("catgirl_audio", state.audio ? "1" : "0");
+  syncTtsBtn();
+  if (state.audio) note("语音已开启，下一条回复会念出来");
+};
+
+$("voiceApply").onclick = async () => {
+  try {
+    const res = await fetch("/api/voice", {
+      method: "PUT",
+      headers: headers(),
+      body: JSON.stringify({ voice: $("voiceSel").value }),
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "HTTP " + res.status);
+    $("voiceHint").textContent = "已切换音色，点「试听」确认一下";
+  } catch (err) {
+    $("voiceHint").textContent = "切换失败：" + err.message;
+  }
+};
+
+$("voiceTry").onclick = async () => {
+  try {
+    const res = await fetch("/api/tts", {
+      method: "POST",
+      headers: headers(),
+      body: JSON.stringify({ text: "主人，我是铃铛，这个声音你喜欢吗？" }),
+    });
+    if (!res.ok) {
+      const data = await res.json().catch(() => ({}));
+      throw new Error(data.detail || "HTTP " + res.status);
+    }
+    playBlob(await res.blob());
+  } catch (err) {
+    $("voiceHint").textContent = "试听失败：" + err.message;
+  }
+};
+
+$("cloneBtn").onclick = async () => {
+  const file = $("refFile").files[0];
+  const refText = $("refText").value.trim();
+  if (!file) return ($("cloneHint").textContent = "先选一段音频文件");
+  if (refText.length < 2) return ($("cloneHint").textContent = "填上录音里逐字对应的原话");
+
+  $("cloneHint").textContent = "上传中…";
+  const form = new FormData();
+  form.append("file", file);
+  form.append("text", refText);
+  const h = { "X-User-Id": state.userId };
+  if (state.apiKey) h["Authorization"] = "Bearer " + state.apiKey;
+  try {
+    const res = await fetch("/api/voice/clone", { method: "POST", headers: h, body: form });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || "HTTP " + res.status);
+    $("cloneHint").textContent = data.customVoiceUri
+      ? "克隆完成，已设为当前音色，去试听吧"
+      : "参考音频已保存，启动本地 TTS 服务后即可使用";
+    loadVoice();
+  } catch (err) {
+    $("cloneHint").textContent = "克隆失败：" + err.message;
+  }
+};
+$("resetBtn").onclick = async () => {
+  await fetch("/api/session/new", { method: "POST", headers: headers() });
+  $("log").innerHTML = "<div class='hint'>新会话开始了，长期记忆还在。</div>";
+  refresh();
+};
+
+$("userInput").value = state.userId;
+$("keyInput").value = state.apiKey;
+$("userInput").onchange = (e) => {
+  state.userId = e.target.value.trim() || "default";
+  localStorage.setItem("catgirl_user", state.userId);
+  refresh();
+};
+$("keyInput").onchange = (e) => {
+  state.apiKey = e.target.value.trim();
+  localStorage.setItem("catgirl_key", state.apiKey);
+  refresh();
+};
+
+syncTtsBtn();
+refresh();
+</script>
+</body>
+</html>
