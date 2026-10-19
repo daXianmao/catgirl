@@ -14,7 +14,7 @@
 ## 切换
 
 ```bash
-cd "D:/AI Tools/catgirl"
+cd catgirl
 git checkout main     # 本地部署版
 git checkout cloud    # 云端部署版
 git branch -v         # 看当前在哪个分支
