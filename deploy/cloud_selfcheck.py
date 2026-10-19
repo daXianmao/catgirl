@@ -3,7 +3,8 @@ import os
 import sys
 import tempfile
 
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
+# 脚本在 deploy/ 下，项目根在上一级，加进去才能 import 到 config / tts
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 
 from config import PROVIDERS, DEFAULTS, load_config, describe
 from tts import TTS, TTSError, TTS_PROVIDERS
