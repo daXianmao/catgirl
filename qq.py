@@ -18,10 +18,12 @@
 """
 import argparse
 import asyncio
+import base64
 import json
 import os
 import re
 import time
+import urllib.request
 
 try:  # websockets >= 13 的新客户端
     from websockets.asyncio.client import connect as ws_connect
@@ -83,12 +85,50 @@ def split_text(text, limit=400):
     return [p for p in (p.strip() for p in parts) if p]
 
 
-def extract_text(message, selfId):
-    """从 OneBot 消息段里取出纯文本，并判断有没有 @ 自己。"""
-    if isinstance(message, str):  # 少数实现只给字符串
-        return message.strip(), f"[CQ:at,qq={selfId}]" in message
+# QQ 原生表情（face）ID → 中文名。覆盖日常会用到的部分，其余统一显示「表情」。
+# 有了它，猫娘才知道对方是笑了、哭了还是在鄙视她，而不是看到一片空白。
+FACE_NAMES = {
+    "0": "惊讶", "1": "撇嘴", "2": "色", "3": "发呆", "4": "得意",
+    "5": "流泪", "6": "害羞", "7": "闭嘴", "8": "睡", "9": "大哭",
+    "10": "尴尬", "11": "发怒", "12": "调皮", "13": "呲牙", "14": "微笑",
+    "15": "难过", "16": "酷", "17": "抓狂", "18": "吐", "19": "偷笑",
+    "20": "可爱", "21": "白眼", "22": "傲慢", "23": "饥饿", "24": "困",
+    "25": "惊恐", "26": "流汗", "27": "憨笑", "28": "大兵", "29": "奋斗",
+    "30": "咒骂", "31": "疑问", "32": "嘘", "33": "晕", "34": "折磨",
+    "35": "衰", "36": "骷髅", "37": "敲打", "38": "再见", "39": "擦汗",
+    "40": "抠鼻", "41": "鼓掌", "42": "糗大了", "43": "坏笑", "44": "左哼哼",
+    "45": "右哼哼", "46": "哈欠", "47": "鄙视", "48": "委屈", "49": "快哭了",
+    "50": "阴险", "51": "亲亲", "52": "吓", "53": "可怜", "54": "菜刀",
+    "55": "西瓜", "56": "啤酒", "57": "篮球", "58": "乒乓", "59": "咖啡",
+    "60": "饭", "61": "猪头", "62": "玫瑰", "63": "凋谢", "64": "示爱",
+    "65": "爱心", "66": "心碎", "67": "蛋糕", "68": "闪电", "69": "炸弹",
+    "70": "刀", "71": "足球", "72": "瓢虫", "73": "便便", "74": "月亮",
+    "75": "太阳", "76": "礼物", "77": "拥抱", "78": "强", "79": "弱",
+    "80": "握手", "81": "胜利", "82": "抱拳", "83": "勾引", "84": "拳头",
+    "85": "差劲", "86": "爱你", "87": "NO", "88": "OK", "89": "爱情",
+    "90": "飞吻", "91": "跳跳", "92": "发抖", "93": "怄火", "94": "转圈",
+    "95": "磕头", "96": "回头", "97": "跳绳", "98": "挥手", "99": "激动",
+    "100": "街舞", "101": "献吻", "102": "左太极", "103": "右太极", "104": "开心",
+    "105": "双喜", "106": "鞭炮", "107": "灯笼", "108": "发财", "109": "K歌",
+    "110": "购物", "111": "邮件", "112": "帅", "113": "喝彩", "114": "祈祷",
+    "115": "爆筋", "116": "棒棒糖", "117": "喝奶", "118": "面条", "119": "香蕉",
+    "120": "飞机", "121": "开车", "122": "高铁", "123": "左车头", "124": "右车头",
+    "125": "多云", "126": "下雨", "127": "钞票", "128": "熊猫", "129": "灯泡",
+    "130": "风车", "131": "闹钟", "132": "打伞", "133": "彩球", "134": "钻戒",
+    "135": "沙发", "136": "纸巾", "137": "药", "138": "手枪", "139": "青蛙",
+    "140": "无奈", "141": "摸着", "142": "迷惑", "143": "赞",
+}
 
-    texts, mentioned = [], False
+
+def extract_text(message, selfId):
+    """从 OneBot 消息段里取出纯文本、是否 @ 了自己、以及图片地址。
+
+    图片只记占位符和链接，要不要真的「看」由上层决定（群里刷图不该张张都烧额度）。
+    """
+    if isinstance(message, str):  # 少数实现只给字符串
+        return message.strip(), f"[CQ:at,qq={selfId}]" in message, []
+
+    texts, mentioned, images = [], False, []
     for seg in message or []:
         kind = seg.get("type")
         data = seg.get("data") or {}
@@ -97,10 +137,21 @@ def extract_text(message, selfId):
         elif kind == "at" and str(data.get("qq")) == str(selfId):
             mentioned = True
         elif kind == "image":
+            url = data.get("url") or ""
+            if url:
+                images.append(url)
             texts.append("［图片］")
         elif kind == "face":
-            continue
-    return "".join(texts).strip(), mentioned
+            name = FACE_NAMES.get(str(data.get("id")))
+            texts.append(f"［表情：{name}］" if name else "［表情］")
+        elif kind == "mface":
+            title = (data.get("summary") or data.get("title") or "").strip("[]")
+            texts.append(f"［表情包：{title}］" if title else "［表情包］")
+        elif kind in ("record", "voice"):
+            texts.append("［语音］")
+        elif kind == "video":
+            texts.append("［视频］")
+    return "".join(texts).strip(), mentioned, images
 
 
 def sender_name(event):
@@ -184,6 +235,42 @@ class QQBot:
         session = QQSession(core, userId)
         self.sessions[userId] = session
         return session
+
+    # ------------------------------------------------------------ 图片识别
+    @staticmethod
+    def _fetch_image(url, timeout=15, limit=5 * 1024 * 1024):
+        """下载图片；超过 5MB 直接放弃，免得大图把内存和额度一起吃光。"""
+        request = urllib.request.Request(url, headers={"User-Agent": "Mozilla/5.0"})
+        with urllib.request.urlopen(request, timeout=timeout) as resp:
+            data = resp.read(limit + 1)
+        return data if len(data) <= limit else b""
+
+    async def read_image(self, session, url):
+        """下载图片交给多模态模型，返回一句描述；失败返回空串，不影响主流程。"""
+        brain = getattr(session.core, "brain", None)
+        if not brain or not getattr(brain, "visionModel", ""):
+            return ""
+        try:
+            raw = await asyncio.to_thread(self._fetch_image, url)
+        except Exception as exc:
+            log(f"图片下载失败：{exc}")
+            return ""
+        if not raw:
+            return ""
+        # 按文件头猜 MIME：模型对 data URI 里声明的类型比较敏感
+        mime = "image/jpeg"
+        if raw[:8] == b"\x89PNG\r\n\x1a\n":
+            mime = "image/png"
+        elif raw[:6] in (b"GIF87a", b"GIF89a"):
+            mime = "image/gif"
+        elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
+            mime = "image/webp"
+        dataUri = f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+        try:
+            return (await asyncio.to_thread(brain.describeImage, dataUri) or "").strip()
+        except Exception as exc:
+            log(f"图片识别失败：{exc}")
+            return ""
 
     async def reply_text(self, session, userText):
         """同步 core 丢进线程池，别堵死事件循环。"""
@@ -285,7 +372,7 @@ class QQBot:
                         self.seen.pop(key, None)
 
         self.stats["收到"] += 1
-        text, mentioned = extract_text(event.get("message"), selfId)
+        text, mentioned, images = extract_text(event.get("message"), selfId)
         text = text.strip()
 
         if kind == "group":
@@ -308,6 +395,20 @@ class QQBot:
             return
 
         session = self.session_for(kind, chatId, event)
+
+        # 图片识别：只处理明显针对她的（私聊，或群里 @ 了她），群里别人刷图不跟着烧额度。
+        # 识别失败就退回「［图片］」占位符，不影响正常聊天
+        if images:
+            limit = int(self.cfg.get("visionMaxImages") or 0)
+            if limit > 0 and (kind == "private" or mentioned):
+                descs = []
+                for url in images[:limit]:
+                    desc = await self.read_image(session, url)
+                    if desc:
+                        descs.append(desc)
+                if descs:
+                    rest = text.replace("［图片］", "").strip()
+                    text = "［图片内容：" + "；".join(descs) + "］" + rest
 
         # 简易指令：重置上下文（长期记忆保留）
         if text.strip() in ("/reset", "重置", "新会话"):

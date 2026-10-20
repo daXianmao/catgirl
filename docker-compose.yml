@@ -64,6 +64,10 @@ services:
       CATGIRL_QQ_AT_ONLY: ${CATGIRL_QQ_AT_ONLY:-true}
       CATGIRL_QQ_VOICE: ${CATGIRL_QQ_VOICE:-false}
       CATGIRL_QQ_MAX_CHARS: ${CATGIRL_QQ_MAX_CHARS:-400}
+      # 图片识别（多模态）：留空 model 即关闭，只发「［图片］」占位符
+      CATGIRL_VISION_MODEL: ${CATGIRL_VISION_MODEL:-}
+      CATGIRL_VISION_BASE_URL: ${CATGIRL_VISION_BASE_URL:-}
+      CATGIRL_VISION_API_KEY: ${CATGIRL_VISION_API_KEY:-}
     volumes:
       - catgirl_data:/data
 
