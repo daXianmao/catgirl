@@ -256,9 +256,14 @@ class CatgirlCore:
 
     # ---------------------------------------------------------------- 状态解析
     def apply_state(self, rawText):
+        """解析 <state .../> 标签，更新心情与好感度。
+
+        返回这条回复自带的 mood；模型没输出标签时返回 None
+        （这样调用方能区分"这次很开心"和"上次残留的好心情"）。
+        """
         match = STATE_TAG.search(rawText or "")
         if not match:
-            return
+            return None
         attrs = dict(ATTR.findall(match.group(1)))
         mood = attrs.get("mood")
         if mood:
@@ -270,6 +275,7 @@ class CatgirlCore:
         if delta:
             affinity = self.store.get_kv_float("affinity", 30) + delta
             self.store.set_kv("affinity", max(0.0, min(100.0, affinity)))
+        return mood
 
     # ---------------------------------------------------------------- 对话
     def respond(self, userText):
@@ -322,7 +328,7 @@ class CatgirlCore:
 
         # 标签只用于更新状态，不能进对话历史，否则下次会当作台词读到
         cleanReply = STATE_TAG.sub("", rawReply).strip()
-        self.apply_state(rawReply)
+        replyMood = self.apply_state(rawReply)
         self.store.add_turn(self.session, "user", userText)
         self.store.add_turn(self.session, "assistant", cleanReply)
         self.remember_async(userText, cleanReply)
@@ -335,6 +341,8 @@ class CatgirlCore:
                 "reply": cleanReply,
                 "session": self.session,
                 "mood": profile["mood"],
+                # 这条回复自带的情绪（可能为 None），调用方据此判断该不该发语音
+                "replyMood": replyMood,
                 "affinity": profile["affinity"],
                 "memoriesUsed": [
                     {"id": m["id"], "content": m["content"], "score": round(m["score"], 3)}

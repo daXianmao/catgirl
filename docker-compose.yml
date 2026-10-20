@@ -75,6 +75,8 @@ services:
       CATGIRL_QQ_PRIVATE: ${CATGIRL_QQ_PRIVATE:-true}
       CATGIRL_QQ_AT_ONLY: ${CATGIRL_QQ_AT_ONLY:-true}
       CATGIRL_QQ_VOICE: ${CATGIRL_QQ_VOICE:-false}
+      # smart = 只在必要的时候发语音（对方点名要 / 语音对语音 / 特别开心）；always = 每条都发
+      CATGIRL_QQ_VOICE_MODE: ${CATGIRL_QQ_VOICE_MODE:-smart}
       CATGIRL_QQ_MAX_CHARS: ${CATGIRL_QQ_MAX_CHARS:-400}
       # 图片识别（多模态）：留空 model 即关闭，只发「［图片］」占位符
       CATGIRL_VISION_MODEL: ${CATGIRL_VISION_MODEL:-qwen3.7-plus}

@@ -49,16 +49,66 @@ STATE_TAG = re.compile(r"<state\s[^>]*/?>", re.S)
 BRACKETS = re.compile(r"［[^［］]*］|\[[^\[\]]*\]|（[^（）]*）|\([^()]*\)")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
 
+# ------------------------------------------------------------ 语音触发词
+# 语音不是每句话都发，只在「有必要」的时候发。三种情况：
+#   1. 对方明确要：发语音 / 念出来 / 说来听听
+#   2. 对方自己发语音：语音对语音
+#   3. 特别开心：reply 的 mood 是开心/得意（只在私聊，群里不主动发）
+# 另外认「别发语音」这类喊停，命中后该会话静默 30 分钟。
+VOICE_REQUEST = re.compile(
+    r"语音|念(?:出来|一下|给我|听|读)|说来听听|读出来|发个音|用声音|voice",
+    re.I,
+)
+VOICE_MUTE = re.compile(r"(?:别|不要|不用|少|停止|关闭).{0,4}语音|关掉语音|别念了|静音", re.I)
+HAPPY_MOODS = ("开心", "得意")
+# 特别开心时只念短句；对方点名要语音时可以念长一点
+VOICE_HAPPY_LIMIT = 120
+VOICE_REQUEST_LIMIT = 300
+VOICE_MUTE_SECONDS = 1800
+
+
 
 def log(text):
     print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
 
 
+def tidy_punctuation(text):
+    """收拾模型爱用的那堆符号。
+
+    "……知道了""——真的吗""！！！"这种挂符号的写法是模板腔的典型特征，
+    真人打字不这样。提示词已经禁过一遍，这里再拦一道，保证出口干净。
+    """
+    # 省略号：整段删掉（"我……不知道"→"我不知道"）
+    text = re.sub(r"\.{3,}|…+", "", text)
+    # 破折号拖长音：换成逗号
+    text = re.sub(r"[—–]{2,}|--{1,}", "，", text)
+    # 连续感叹/疑问/波浪号：压成一个
+    text = re.sub(r"!{2,}", "!", text)
+    text = re.sub(r"！{2,}", "！", text)
+    text = re.sub(r"\?{2,}", "?", text)
+    text = re.sub(r"？{2,}", "？", text)
+    text = re.sub(r"~{2,}", "~", text)
+    text = re.sub(r"～{2,}", "～", text)
+    # 重复句号
+    text = re.sub(r"。{2,}", "。", text)
+    # 中文标点前不留空格
+    text = re.sub(r"[ \t　]+([，。！？；：、])", r"\1", text)
+    # 标点叠用：逗号紧挨着句号问号感叹号时，逗号多余（"真的吗，？"→"真的吗？"）
+    text = re.sub(r"，(?=[。！？!?])", "", text)
+    text = re.sub(r"(?<=[。！？!?])，", "", text)
+    # 结尾标点最多留一个
+    text = re.sub(r"([，。！？])\1+$", r"\1", text.strip())
+    # 句号后面的空格去掉（中文里不用空格）
+    text = re.sub(r"。\s+", "。", text)
+    return text.strip()
+
+
 def forQQ(text):
-    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号。"""
+    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号、清符号。"""
     text = STATE_TAG.sub("", text or "")
     text = BRACKETS.sub("", text)
     text = MD_MARKS.sub("", text)
+    text = tidy_punctuation(text)
     text = re.sub(r"[ \t　]{2,}", " ", text)
     text = re.sub(r"\n[ \t　]*\n+", "\n", text)  # 括号删除后可能留下空行
     return text.strip()
@@ -178,6 +228,7 @@ class QQSession:
         self.lock = asyncio.Lock()
         self.lastSent = 0.0
         self.lastUsed = time.time()
+        self.voiceMuteUntil = 0.0  # 对方喊停后，到这个时间点前都不发语音
 
 
 class QQBot:
@@ -190,6 +241,10 @@ class QQBot:
         self.privateOn = bool(cfg.get("qqPrivate"))
         self.atOnly = bool(cfg.get("qqAtOnly"))
         self.voiceOn = bool(cfg.get("qqVoice"))
+        # always = 旧行为，每条都发；smart = 只在必要的时候发（默认）
+        self.voiceMode = str(cfg.get("qqVoiceMode") or "smart").strip().lower()
+        if self.voiceMode not in ("always", "smart"):
+            self.voiceMode = "smart"
         self.showName = bool(cfg.get("qqNickname"))
         self.ownerQq = str(cfg.get("ownerQq") or "").strip()
         self.rate = float(cfg.get("qqRate") or 1.5)
@@ -316,26 +371,29 @@ class QQBot:
             return ""
 
     async def reply_text(self, session, userText):
-        """同步 core 丢进线程池，别堵死事件循环。"""
+        """同步 core 丢进线程池，别堵死事件循环。
+
+        返回 (回复文本, 元信息)；元信息里带这条回复的 mood，用来判断该不该发语音。
+        """
         async with self.semaphore:
             try:
                 text, meta = await asyncio.to_thread(session.core.respond, userText)
             except BrainError as exc:
                 self.stats["失败"] += 1
                 log(f"模型出错：{exc}")
-                return "（脑袋突然卡住了…等下再说好不好）"
+                return "（脑袋突然卡住了…等下再说好不好）", {}
             except Exception as exc:  # 兜底，进程不能因为一条消息挂掉
                 self.stats["失败"] += 1
                 log(f"回复失败：{exc!r}")
-                return "（出错了喵…）"
+                return "（出错了喵…）", {}
 
         if meta.get("error"):
             self.stats["失败"] += 1
             log(f"模型返回错误：{meta['error'][:200]}")
-            return "（脑袋突然卡住了…等下再说好不好）"
+            return "（脑袋突然卡住了…等下再说好不好）", meta
 
         self.stats["回复"] += 1
-        return forQQ(text)
+        return forQQ(text), meta
 
     # ------------------------------------------------------------ 发送
     async def call(self, action, params, timeout=15):
@@ -373,9 +431,55 @@ class QQBot:
             if index < len(chunks) - 1:
                 await asyncio.sleep(0.4)
 
+    def voice_decision(self, kind, rawText, reply, meta, session, hasVoiceMsg=False):
+        """这一轮要不要额外发一条语音？返回 (要发, 原因)。
+
+        smart 模式（默认）只在三种情况下发：
+          1. 对方点名要语音（"发个语音""念出来"）
+          2. 对方自己发的是语音 → 语音回语音
+          3. 特别开心（这条回复的 mood 是开心/得意）——只在私聊，群里不主动发
+        另外对方说"别发语音"就静默 30 分钟。
+        """
+        if not self.voiceOn:
+            return False, "语音功能未开"
+        if not reply:
+            return False, "没有可念的内容"
+
+        now = time.time()
+        # 喊停优先判断：静音词里也含"语音"，必须先判
+        if VOICE_MUTE.search(rawText or ""):
+            session.voiceMuteUntil = now + VOICE_MUTE_SECONDS
+            log(f"对方要求别发语音，静默 {VOICE_MUTE_SECONDS // 60} 分钟")
+            return False, "对方要求安静"
+        if session.voiceMuteUntil > now:
+            return False, "静默中"
+
+        if self.voiceMode == "always":
+            return len(reply) <= VOICE_HAPPY_LIMIT, "always 模式"
+
+        if VOICE_REQUEST.search(rawText or ""):
+            return True, "对方点名要语音"
+        if hasVoiceMsg:
+            return True, "语音对语音"
+        if kind == "private" and (meta.get("replyMood") or "") in HAPPY_MOODS:
+            return len(reply) <= VOICE_HAPPY_LIMIT, "特别开心"
+        return False, ""
+
     async def send_voice(self, kind, chatId, text, userId):
         """把回复合成语音发出去。优先给协议端本地路径（同一卷），
         失败再退 base64（协议端多半支持 base64://，代价是消息变大）。"""
+        # 对方点名要语音时允许念长一点，但别把整篇小作文都塞进一条语音
+        limit = VOICE_REQUEST_LIMIT
+        if len(text) > limit:
+            cut = text[:limit]
+            for mark in ("。", "！", "？", "，", " "):
+                pos = cut.rfind(mark)
+                if pos > limit * 0.5:
+                    cut = cut[: pos + 1]
+                    break
+            text = cut.strip()
+        if not text:
+            return
         try:
             engine = TTS(self.cfg, os.path.join(self.cfg["dataDir"], "users", userId, "voice"))
             result = await asyncio.to_thread(engine.synthesize, text)
@@ -432,6 +536,9 @@ class QQBot:
         self.stats["收到"] += 1
         text, mentioned, images, records = extract_text(event.get("message"), selfId)
         text = text.strip()
+        # 原文留一份：后面图片/语音会被替换成系统说明，
+        # 但"对方要不要语音"得按他真正说的话来判断
+        rawText = text
 
         if kind == "group":
             gid = str(event.get("group_id") or "")
@@ -496,9 +603,13 @@ class QQBot:
             userText = text
 
         async with session.lock:
-            reply = await self.reply_text(session, userText)
+            reply, meta = await self.reply_text(session, userText)
             await self.send(kind, chatId, reply, session)
-            if self.voiceOn and len(reply) <= 120:
+            wantVoice, why = self.voice_decision(
+                kind, rawText, reply, meta, session, bool(records)
+            )
+            if wantVoice:
+                log(f"发语音（{why}）")
                 await self.send_voice(kind, chatId, reply, session.key)
 
     # ------------------------------------------------------------ 连接

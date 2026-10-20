@@ -125,6 +125,9 @@ DEFAULTS = {
     "qqRate": 1.5,
     "qqMaxChars": 400,
     "qqVoice": False,
+    # 语音发送策略：smart = 只在必要的时候发（对方点名要 / 语音对语音 / 特别开心）；
+    # always = 旧行为，每条回复后面都跟一条语音
+    "qqVoiceMode": "smart",
     "qqNickname": True,
     "ownerQq": "",
     # 图片识别：用多模态模型把 QQ 图片转成一句描述再过给主模型。
@@ -246,6 +249,7 @@ def load_config(overrides=None):
         "CATGIRL_QQ_GROUPS": "qqGroups",
         "CATGIRL_QQ_RATE": "qqRate",
         "CATGIRL_QQ_MAX_CHARS": "qqMaxChars",
+        "CATGIRL_QQ_VOICE_MODE": "qqVoiceMode",
         "CATGIRL_OWNER_QQ": "ownerQq",
         "CATGIRL_VISION_MODEL": "visionModel",
         "CATGIRL_VISION_BASE_URL": "visionBaseUrl",
