@@ -25,6 +25,8 @@ services:
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
     volumes:
       - catgirl_data:/data
+      # 热挂载人格文件：改完只需 docker compose restart，不用重建镜像
+      - ./persona.md:/app/persona.md:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
       interval: 30s
@@ -70,6 +72,8 @@ services:
       CATGIRL_VISION_API_KEY: ${CATGIRL_VISION_API_KEY:-}
     volumes:
       - catgirl_data:/data
+      # 同上，QQ 服务也要能读到最新的人格文件
+      - ./persona.md:/app/persona.md:ro
 
   # QQ 协议端（非官方实现）。首次启动看日志里的 WebUI 地址和 token，扫码登录。
   napcat:
