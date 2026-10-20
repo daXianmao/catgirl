@@ -44,6 +44,9 @@ from tts import TTS, TTSError
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_TAG = re.compile(r"<state\s[^>]*/?>", re.S)
+# 模型偶尔会把「［图片］」「（歪头）」这类括号包着的内容当台词复述出来：
+# 方括号是系统占位符，圆括号是动作/心理描写，都不该出现在 QQ 回复里。出口统一清掉。
+BRACKETS = re.compile(r"［[^［］]*］|\[[^\[\]]*\]|（[^（）]*）|\([^()]*\)")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
 
 
@@ -52,10 +55,12 @@ def log(text):
 
 
 def forQQ(text):
-    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去 Markdown 记号。"""
+    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号。"""
     text = STATE_TAG.sub("", text or "")
+    text = BRACKETS.sub("", text)
     text = MD_MARKS.sub("", text)
-    text = re.sub(r"\n{3,}", "\n\n", text)
+    text = re.sub(r"[ \t　]{2,}", " ", text)
+    text = re.sub(r"\n[ \t　]*\n+", "\n", text)  # 括号删除后可能留下空行
     return text.strip()
 
 
