@@ -129,7 +129,7 @@ DEFAULTS = {
     "ownerQq": "",
     # 图片识别：用多模态模型把 QQ 图片转成一句描述再过给主模型。
     # 留空 = 关闭（只发「［图片］」占位符）。baseUrl / apiKey 留空则复用主配置。
-    "visionModel": "qwen3-vl-flash",
+    "visionModel": "qwen3.7-plus",
     "visionBaseUrl": "",
     "visionApiKey": "",
     "visionMaxImages": 3,
