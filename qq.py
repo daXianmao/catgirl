@@ -126,14 +126,14 @@ FACE_NAMES = {
 
 
 def extract_text(message, selfId):
-    """从 OneBot 消息段里取出纯文本、是否 @ 了自己、以及图片地址。
+    """从 OneBot 消息段里取出纯文本、是否 @ 了自己、图片地址、语音标识。
 
-    图片只记占位符和链接，要不要真的「看」由上层决定（群里刷图不该张张都烧额度）。
+    图片/语音只记占位符和引用，要不要真的「看/听」由上层决定（群里刷图刷语音不该张张都烧额度）。
     """
     if isinstance(message, str):  # 少数实现只给字符串
-        return message.strip(), f"[CQ:at,qq={selfId}]" in message, []
+        return message.strip(), f"[CQ:at,qq={selfId}]" in message, [], []
 
-    texts, mentioned, images = [], False, []
+    texts, mentioned, images, records = [], False, [], []
     for seg in message or []:
         kind = seg.get("type")
         data = seg.get("data") or {}
@@ -153,10 +153,11 @@ def extract_text(message, selfId):
             title = (data.get("summary") or data.get("title") or "").strip("[]")
             texts.append(f"［表情包：{title}］" if title else "［表情包］")
         elif kind in ("record", "voice"):
+            records.append(data)
             texts.append("［语音］")
         elif kind == "video":
             texts.append("［视频］")
-    return "".join(texts).strip(), mentioned, images
+    return "".join(texts).strip(), mentioned, images, records
 
 
 def sender_name(event):
@@ -277,6 +278,43 @@ class QQBot:
             log(f"图片识别失败：{exc}")
             return ""
 
+    async def read_voice(self, session, data):
+        """把一条 QQ 语音转成文字：get_record 拿 wav base64 → qwen3-asr 转写。
+
+        失败返回空串，不影响主流程（退回「［语音］」占位符）。
+        """
+        brain = getattr(session.core, "brain", None)
+        if not brain or not getattr(brain, "asrModel", ""):
+            return ""
+        ref = data.get("file") or data.get("file_id") or data.get("url") or ""
+        if not ref:
+            return ""
+        try:
+            result = await self.call("get_record", {"file": ref, "out_format": "wav"})
+        except Exception as exc:
+            log(f"取语音失败：{exc}")
+            return ""
+        payload = (result or {}).get("data") or {}
+        b64 = payload.get("base64") or ""
+        if not b64:
+            # 有的实现只回本地路径，读文件兜底
+            path = payload.get("file") or ""
+            try:
+                if path and os.path.exists(path):
+                    with open(path, "rb") as handle:
+                        b64 = base64.b64encode(handle.read()).decode("ascii")
+            except OSError:
+                b64 = ""
+        if not b64:
+            log("取语音失败：协议端没返回音频数据")
+            return ""
+        dataUri = "data:audio/wav;base64," + b64
+        try:
+            return (await asyncio.to_thread(brain.transcribe, dataUri) or "").strip()
+        except Exception as exc:
+            log(f"语音识别失败：{exc}")
+            return ""
+
     async def reply_text(self, session, userText):
         """同步 core 丢进线程池，别堵死事件循环。"""
         async with self.semaphore:
@@ -336,7 +374,8 @@ class QQBot:
                 await asyncio.sleep(0.4)
 
     async def send_voice(self, kind, chatId, text, userId):
-        """发语音。需要协议端能读到同一个绝对路径（Docker 里要挂同一卷）。"""
+        """把回复合成语音发出去。优先给协议端本地路径（同一卷），
+        失败再退 base64（协议端多半支持 base64://，代价是消息变大）。"""
         try:
             engine = TTS(self.cfg, os.path.join(self.cfg["dataDir"], "users", userId, "voice"))
             result = await asyncio.to_thread(engine.synthesize, text)
@@ -344,10 +383,24 @@ class QQBot:
             log(f"语音合成失败，已只发文字：{exc}")
             return
 
-        fileUri = "file:///" + os.path.abspath(result["path"]).replace("\\", "/").lstrip("/")
         action = "send_group_msg" if kind == "group" else "send_private_msg"
         key = "group_id" if kind == "group" else "user_id"
+
+        # 协议端能读到的绝对路径（compose 里 catgirl 与 napcat 挂同一个 /data 卷）
+        fileUri = "file://" + os.path.abspath(result["path"]).replace("\\", "/")
         sent = await self.call(action, {key: chatId, "message": [{"type": "record", "data": {"file": fileUri}}]})
+        if sent and sent.get("status") not in ("failed", "error"):
+            return
+
+        # 本地路径这招不行就改 base64，彻底摆脱路径/挂载/权限问题
+        try:
+            with open(result["path"], "rb") as handle:
+                raw = handle.read()
+        except OSError as exc:
+            log(f"读语音文件失败：{exc}")
+            return
+        b64Uri = "base64://" + base64.b64encode(raw).decode("ascii")
+        sent = await self.call(action, {key: chatId, "message": [{"type": "record", "data": {"file": b64Uri}}]})
         if not sent or sent.get("status") in ("failed", "error"):
             log("语音发送失败（协议端可能不支持该格式），文字已发出")
 
@@ -377,7 +430,7 @@ class QQBot:
                         self.seen.pop(key, None)
 
         self.stats["收到"] += 1
-        text, mentioned, images = extract_text(event.get("message"), selfId)
+        text, mentioned, images, records = extract_text(event.get("message"), selfId)
         text = text.strip()
 
         if kind == "group":
@@ -414,6 +467,18 @@ class QQBot:
                 if descs:
                     rest = text.replace("［图片］", "").strip()
                     text = "［图片内容：" + "；".join(descs) + "］" + rest
+
+        # 语音识别：私聊或群里 @ 了她才转写，避免群里随便一条语音都烧额度。
+        # 失败就退回「［语音］」占位符，不影响正常聊天
+        if records and (kind == "private" or mentioned):
+            transcripts = []
+            for data in records[:3]:
+                transcript = await self.read_voice(session, data)
+                if transcript:
+                    transcripts.append(transcript)
+            if transcripts:
+                rest = text.replace("［语音］", "").strip()
+                text = "［语音内容：" + "；".join(transcripts) + "］" + rest
 
         # 简易指令：重置上下文（长期记忆保留）
         if text.strip() in ("/reset", "重置", "新会话"):

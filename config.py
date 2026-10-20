@@ -133,6 +133,11 @@ DEFAULTS = {
     "visionBaseUrl": "",
     "visionApiKey": "",
     "visionMaxImages": 3,
+    # 语音识别：把 QQ 语音消息转成文字，走 dashscope 的 qwen3-asr-flash。
+    # 留空 = 关闭（只发「［语音］」占位符）。baseUrl / apiKey 留空则复用主配置。
+    "asrModel": "qwen3-asr-flash",
+    "asrBaseUrl": "",
+    "asrApiKey": "",
 }
 
 
@@ -245,6 +250,9 @@ def load_config(overrides=None):
         "CATGIRL_VISION_MODEL": "visionModel",
         "CATGIRL_VISION_BASE_URL": "visionBaseUrl",
         "CATGIRL_VISION_API_KEY": "visionApiKey",
+        "CATGIRL_ASR_MODEL": "asrModel",
+        "CATGIRL_ASR_BASE_URL": "asrBaseUrl",
+        "CATGIRL_ASR_API_KEY": "asrApiKey",
     }
     for envName, key in envMap.items():
         value = _env(envName)

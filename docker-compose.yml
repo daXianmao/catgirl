@@ -80,6 +80,10 @@ services:
       CATGIRL_VISION_MODEL: ${CATGIRL_VISION_MODEL:-qwen3.7-plus}
       CATGIRL_VISION_BASE_URL: ${CATGIRL_VISION_BASE_URL:-}
       CATGIRL_VISION_API_KEY: ${CATGIRL_VISION_API_KEY:-}
+      # 语音识别：把 QQ 语音消息转成文字（qwen3-asr-flash，复用对话 key），留空即关闭
+      CATGIRL_ASR_MODEL: ${CATGIRL_ASR_MODEL:-qwen3-asr-flash}
+      CATGIRL_ASR_BASE_URL: ${CATGIRL_ASR_BASE_URL:-}
+      CATGIRL_ASR_API_KEY: ${CATGIRL_ASR_API_KEY:-}
     volumes:
       - catgirl_data:/data
       # 同上，QQ 服务也要能读到最新的人格文件

@@ -113,6 +113,11 @@ class Brain:
         self.visionBaseUrl = (cfg.get("visionBaseUrl") or cfg["baseUrl"]).rstrip("/")
         self.visionApiKey = cfg.get("visionApiKey") or self.apiKey
 
+        # 语音识别：QQ 语音转文字，复用 qwen3-asr-flash（OpenAI 兼容 input_audio）。
+        self.asrModel = (cfg.get("asrModel") or "").strip()
+        self.asrBaseUrl = (cfg.get("asrBaseUrl") or cfg["baseUrl"]).rstrip("/")
+        self.asrApiKey = cfg.get("asrApiKey") or self.apiKey
+
         # 本机 LM Studio 并发推理会互相踢掉，统一串行最稳；在线服务也无所谓这点延迟
         self._lock = threading.RLock()
         self._jsonStrategy = None  # 记住哪一档能用，避免每次都试错
@@ -189,6 +194,36 @@ class Brain:
         with self._lock:
             with self._request(
                 f"{self.visionBaseUrl}/chat/completions", payload, self.visionApiKey
+            ) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        return (data["choices"][0]["message"].get("content") or "").strip()
+
+    # ---------------------------------------------------------------- 语音识别
+    def transcribe(self, dataUri):
+        """把一段音频（data URI）交给 qwen3-asr-flash 转成文字；未配置则返回空串。
+
+        QQ 语音经过协议端 get_record 转成 wav 后，编码成 data:audio/wav;base64,…
+        这里走 compatible-mode 的 chat/completions，用 input_audio content 传进去，
+        复用对话模型同一个 key，不用另开服务。
+        """
+        if not self.asrModel or not dataUri:
+            return ""
+        payload = {
+            "model": self.asrModel,
+            "messages": [{
+                "role": "user",
+                "content": [{
+                    "type": "input_audio",
+                    "input_audio": {"data": dataUri},
+                }],
+            }],
+            "stream": False,
+            "asr_options": {"enable_itn": False},
+        }
+        _debug("语音识别", f"model={self.asrModel}")
+        with self._lock:
+            with self._request(
+                f"{self.asrBaseUrl}/chat/completions", payload, self.asrApiKey
             ) as resp:
                 data = json.loads(resp.read().decode("utf-8"))
         return (data["choices"][0]["message"].get("content") or "").strip()
