@@ -87,10 +87,16 @@ services:
     ports:
       - "6099:6099"   # WebUI：扫码登录 + 配置 OneBot 服务
     volumes:
-      - ./napcat/config:/app/napcat/config
-      - ./napcat/qq:/app/.config/QQ
+      # 必须用命名卷，不能用 ./napcat/config 这类绑定挂载：
+      # 绑定挂载在宿主目录为空时会把镜像里的默认配置和 QQ 登录数据整个遮住，
+      # 一旦 --force-recreate 重建容器就会掉登录，OneBot 服务也不再监听。
+      # 命名卷首次创建时会自动从镜像预填充内容，之后跨容器重建持久保留。
+      - napcat_config:/app/napcat/config
+      - napcat_qq:/app/.config/QQ
       - catgirl_data:/data:ro   # 只读挂载，发语音时协议端要能读到音频文件
     shm_size: 256m
 
 volumes:
   catgirl_data:
+  napcat_config:
+  napcat_qq:
