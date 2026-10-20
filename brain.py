@@ -107,6 +107,12 @@ class Brain:
         self.thinkingMode = (cfg.get("thinkingMode") or "none").lower()
         self.disableThinking = bool(cfg.get("disableThinking", True))
 
+        # 多模态：qq.py 收到图片时用它把图转成一句描述，留空则关闭图片识别。
+        # baseUrl / apiKey 留空就复用主配置，通常只需要换 model 名。
+        self.visionModel = (cfg.get("visionModel") or "").strip()
+        self.visionBaseUrl = (cfg.get("visionBaseUrl") or cfg["baseUrl"]).rstrip("/")
+        self.visionApiKey = cfg.get("visionApiKey") or self.apiKey
+
         # 本机 LM Studio 并发推理会互相踢掉，统一串行最稳；在线服务也无所谓这点延迟
         self._lock = threading.RLock()
         self._jsonStrategy = None  # 记住哪一档能用，避免每次都试错
@@ -155,6 +161,37 @@ class Brain:
         with self._request(f"{self.baseUrl}/models") as resp:
             data = json.loads(resp.read().decode("utf-8"))
         return [item.get("id") for item in data.get("data", [])]
+
+    # ---------------------------------------------------------------- 多模态
+    def describeImage(self, dataUri, prompt=None):
+        """把一张图片交给多模态模型，返回一句中文描述；未配置则返回空串。
+
+        传 data URI 而不是图片 URL，是因为 QQ 的图片链接带时效，
+        下载完立刻编码最稳妥。
+        """
+        if not self.visionModel or not dataUri:
+            return ""
+        prompt = prompt or "用一句中文描述这张图片，30 字以内，只说看到的内容，不要客套。"
+        payload = {
+            "model": self.visionModel,
+            "messages": [{
+                "role": "user",
+                "content": [
+                    {"type": "text", "text": prompt},
+                    {"type": "image_url", "image_url": {"url": dataUri}},
+                ],
+            }],
+            "max_tokens": 160,
+            "temperature": 0.2,
+            "stream": False,
+        }
+        _debug("视觉", f"model={self.visionModel}")
+        with self._lock:
+            with self._request(
+                f"{self.visionBaseUrl}/chat/completions", payload, self.visionApiKey
+            ) as resp:
+                data = json.loads(resp.read().decode("utf-8"))
+        return (data["choices"][0]["message"].get("content") or "").strip()
 
     # ------------------------------------------------------------ 请求体拼装
     def _thinking_payload(self):

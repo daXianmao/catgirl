@@ -127,6 +127,12 @@ DEFAULTS = {
     "qqVoice": False,
     "qqNickname": True,
     "ownerQq": "",
+    # 图片识别：用多模态模型把 QQ 图片转成一句描述再过给主模型。
+    # 留空 = 关闭（只发「［图片］」占位符）。baseUrl / apiKey 留空则复用主配置。
+    "visionModel": "qwen-vl-plus",
+    "visionBaseUrl": "",
+    "visionApiKey": "",
+    "visionMaxImages": 3,
 }
 
 
@@ -236,6 +242,9 @@ def load_config(overrides=None):
         "CATGIRL_QQ_RATE": "qqRate",
         "CATGIRL_QQ_MAX_CHARS": "qqMaxChars",
         "CATGIRL_OWNER_QQ": "ownerQq",
+        "CATGIRL_VISION_MODEL": "visionModel",
+        "CATGIRL_VISION_BASE_URL": "visionBaseUrl",
+        "CATGIRL_VISION_API_KEY": "visionApiKey",
     }
     for envName, key in envMap.items():
         value = _env(envName)
@@ -251,6 +260,7 @@ def load_config(overrides=None):
     cfg["qqNickname"] = _as_bool(_env("CATGIRL_QQ_NICKNAME", fileCfg.get("qqNickname")), True)
     cfg["qqRate"] = float(cfg["qqRate"] or 1.5)
     cfg["qqMaxChars"] = int(cfg["qqMaxChars"] or 400)
+    cfg["visionMaxImages"] = max(0, int(cfg.get("visionMaxImages") or 0))
     cfg["temperature"] = float(cfg["temperature"])
     cfg["maxTokens"] = int(cfg["maxTokens"])
     cfg["topK"] = int(cfg["topK"])
