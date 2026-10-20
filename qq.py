@@ -44,6 +44,9 @@ from tts import TTS, TTSError
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_TAG = re.compile(r"<state\s[^>]*/?>", re.S)
+# 消息占位符：模型偶尔会把「［图片］」「［表情：微笑］」当台词复述出来，
+# 发出去用户就看到一堆方括号，观感很差。这里在出口统一清掉。
+PLACEHOLDER = re.compile(r"［[^［］]*］")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
 
 
@@ -52,9 +55,11 @@ def log(text):
 
 
 def forQQ(text):
-    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去 Markdown 记号。"""
+    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去占位符、去 Markdown 记号。"""
     text = STATE_TAG.sub("", text or "")
+    text = PLACEHOLDER.sub("", text)
     text = MD_MARKS.sub("", text)
+    text = re.sub(r"[ \t　]{2,}", " ", text)
     text = re.sub(r"\n{3,}", "\n\n", text)
     return text.strip()
 
