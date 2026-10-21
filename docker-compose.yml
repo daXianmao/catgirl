@@ -52,8 +52,6 @@ services:
       timeout: 5s
       retries: 3
       start_period: 10s
-    depends_on:
-      - napcat
     environment:
       CATGIRL_PROVIDER: ${CATGIRL_PROVIDER:-dashscope}
       CATGIRL_API_KEY: ${CATGIRL_API_KEY:-}
@@ -67,9 +65,11 @@ services:
       CATGIRL_TTS_PROVIDER: ${CATGIRL_TTS_PROVIDER:-edge}
       CATGIRL_TTS_KEY: ${CATGIRL_TTS_KEY:-}
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
-      # 指向同一网络里的 NapCat
       CATGIRL_QQ_ENABLED: "true"
-      CATGIRL_QQ_WS: ws://napcat:3001
+      # 协议端地址：
+      #   协议端跑在宿主机（NapCat Shell + systemd）→ ws://host.docker.internal:3001
+      #   协议端跑在 Docker 里（备用方案）        → ws://napcat:3001
+      CATGIRL_QQ_WS: ${CATGIRL_QQ_WS:-ws://host.docker.internal:3001}
       CATGIRL_QQ_TOKEN: ${CATGIRL_QQ_TOKEN:-}
       CATGIRL_QQ_GROUPS: ${CATGIRL_QQ_GROUPS:-}
       CATGIRL_QQ_PRIVATE: ${CATGIRL_QQ_PRIVATE:-true}
@@ -90,13 +90,21 @@ services:
       - catgirl_data:/data
       # 同上，QQ 服务也要能读到最新的人格文件
       - ./persona.md:/app/persona.md:ro
+    extra_hosts:
+      # 协议端跑在宿主机时（NapCat Shell + systemd，推荐），
+      # 用 host-gateway 把宿主机的 3001 端口映射进容器
+      - "host.docker.internal:host-gateway"
 
-  # QQ 协议端（非官方实现）。首次启动看日志里的 WebUI 地址和 token，扫码登录。
+  # QQ 协议端（Docker 版，备用方案）。
+  # 默认不启用：推荐在宿主机用 NapCat Shell + systemd 跑协议端（见 06_napcat_native.sh），
+  # 那个方案崩溃自动重启、日志可查、也更省内存。
+  # 要用回 Docker 版：sudo docker compose --profile qq --profile napcat-docker up -d
+  # （同时把 CATGIRL_QQ_WS 改回 ws://napcat:3001）
   napcat:
     image: mlikiowa/napcat-docker:latest
     container_name: napcat
     restart: unless-stopped
-    profiles: ["qq"]
+    profiles: ["napcat-docker"]
     environment:
       NAPCAT_UID: ${NAPCAT_UID:-1000}
       NAPCAT_GID: ${NAPCAT_GID:-1000}
