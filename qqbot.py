@@ -483,7 +483,66 @@ class OfficialBot:
             delay = min(delay * 2, 60)  # 别在鉴权失败时疯狂重试，会被平台拉黑
 
 
+def explain_failure(text):
+    """把平台的错误串翻成人话。这几条是实测和社区里出现频率最高的。"""
+    low = (text or "").lower()
+    if "白名单" in (text or "") or "whitelist" in low:
+        return "→ IP 白名单：开放平台「开发设置 → 服务器 IP 白名单」加上这台服务器的公网 IP"
+    if "火星" in (text or ""):
+        return "→ 「机器人去火星了」八成也是 IP 白名单没填对，先查这一项"
+    if "appid" in low or "app id" in low or "100016" in (text or "") or "invalid app" in low:
+        return "→ AppID 或 AppSecret 填错了；Secret 只在创建时显示一次，填错只能重置"
+    if "401" in (text or "") or "unauthorized" in low:
+        return "→ 凭证无效：Secret 可能少复制了字符，或者这个机器人已经被删除"
+    return ""
+
+
+async def check_bot(cfg):
+    """只做连通性自检，不连网关。逐层验证，坏在哪一层就说哪一层。"""
+    bot = OfficialBot(cfg)
+
+    # 第一层：AppID + Secret 能不能换到 token
+    try:
+        token = await bot.access_token()
+    except Exception as exc:
+        log(f"取 token 失败：{exc}")
+        hint = explain_failure(str(exc))
+        if hint:
+            log(hint)
+        return
+    log(f"取 token 成功（{token[:8]}…）")
+
+    # 第二层：调一次 OpenAPI，这一层才会真正校验 IP 白名单
+    status, raw = await bot.api("GET", "/users/@me")
+    if status != 200:
+        log(f"调用 OpenAPI 失败（{status}）：{raw[:200]}")
+        hint = explain_failure(raw)
+        if hint:
+            log(hint)
+        return
+    try:
+        info = json.loads(raw)
+    except Exception:
+        info = {}
+    log(f"身份确认：{info.get('username') or info.get('nick') or '?'}"
+        f"（机器人 id {info.get('id') or '?'}）")
+
+    # 第三层：网关地址能不能取到，决定 WebSocket 连不连得上
+    try:
+        url = await bot.gateway()
+    except Exception as exc:
+        log(f"取网关失败：{exc}")
+        return
+    log(f"网关地址：{url}")
+
+    log("自检通过。如果连上却收不到消息，按顺序查这三条：")
+    log("  1) 开发设置 → 事件订阅与回调地址，必须是 WebSocket（配了 Webhook 回调地址，WS 就废了）")
+    log("  2) 机器人要先被加为好友 / 拉进群；群里必须 @ 它才会有事件")
+    log("  3) 个人主体：只能拉进自己是群主或管理员的群；给他人用要在「内部体验号码」里加")
+
+
 def main():
+
     parser = argparse.ArgumentParser(description="用官方接口把猫娘接到 QQ")
     parser.add_argument("--check", action="store_true", help="只检查配置与 token，不连网关")
     args = parser.parse_args()
@@ -498,12 +557,7 @@ def main():
         if not (cfg.get("qqbotAppId") and cfg.get("qqbotSecret")):
             log("还没配 AppID/Secret：去 q.qq.com 创建机器人后填进 .env")
             return
-        bot = OfficialBot(cfg)
-        try:
-            token = asyncio.run(bot.access_token())
-            log(f"token 获取成功（{token[:8]}…），说明 AppID/Secret/IP 白名单都通")
-        except Exception as exc:
-            log(f"token 获取失败：{exc}")
+        asyncio.run(check_bot(cfg))
         return
 
     if not cfg.get("qqbotEnabled"):

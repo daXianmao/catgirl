@@ -128,8 +128,10 @@ services:
       # q.qq.com 创建机器人后拿到的 AppID 和 AppSecret
       CATGIRL_QQBOT_APP_ID: ${CATGIRL_QQBOT_APP_ID:-}
       CATGIRL_QQBOT_SECRET: ${CATGIRL_QQBOT_SECRET:-}
-      # 机器人没上线前只有沙箱环境能用，先 true
-      CATGIRL_QQBOT_SANDBOX: ${CATGIRL_QQBOT_SANDBOX:-true}
+      # false（默认）= 正式环境 api.sgroup.qq.com，2026-03 起「扫码即建」的新流程用这个
+      # true          = 沙箱 sandbox.api.sgroup.qq.com，老流程（邮箱注册 + 沙箱配置）才需要
+      # 配错的表现：鉴权成功，但发消息永远没反应
+      CATGIRL_QQBOT_SANDBOX: ${CATGIRL_QQBOT_SANDBOX:-false}
       # 官方给的是 openid 不是 QQ 号，第一次私聊后从日志抄进来就能被认成主人
       CATGIRL_QQBOT_OWNER_OPENID: ${CATGIRL_QQBOT_OWNER_OPENID:-}
       CATGIRL_QQBOT_RATE: ${CATGIRL_QQBOT_RATE:-1.2}
