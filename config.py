@@ -160,7 +160,7 @@ DEFAULTS = {
     "qqbotAppId": "",
     "qqbotSecret": "",
     # 机器人没上线时只有沙箱环境可用，所以默认先沙箱
-    "qqbotSandbox": True,
+    "qqbotSandbox": False,
     # 官方给的是 openid 不是 QQ 号，第一次对话从日志里抄进来
     "qqbotOwnerOpenid": "",
     "qqbotRate": 1.2,
@@ -314,7 +314,7 @@ def load_config(overrides=None):
     cfg["phoneRate"] = float(cfg["phoneRate"] or 1.5)
     cfg["phoneMaxChars"] = int(cfg["phoneMaxChars"] or 400)
     cfg["qqbotEnabled"] = _as_bool(_env("CATGIRL_QQBOT_ENABLED", fileCfg.get("qqbotEnabled")), False)
-    cfg["qqbotSandbox"] = _as_bool(_env("CATGIRL_QQBOT_SANDBOX", fileCfg.get("qqbotSandbox")), True)
+    cfg["qqbotSandbox"] = _as_bool(_env("CATGIRL_QQBOT_SANDBOX", fileCfg.get("qqbotSandbox")), False)
     cfg["qqbotRate"] = float(cfg["qqbotRate"] or 1.2)
     cfg["qqbotMaxChars"] = int(cfg["qqbotMaxChars"] or 400)
     cfg["visionMaxImages"] = max(0, int(cfg.get("visionMaxImages") or 0))
