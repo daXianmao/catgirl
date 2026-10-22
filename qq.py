@@ -98,6 +98,8 @@ def tidy_punctuation(text):
     text = re.sub(r"(?<=[。！？!?])，", "", text)
     # 结尾标点最多留一个
     text = re.sub(r"([，。！？])\1+$", r"\1", text.strip())
+    # 剥掉状态标签后常在末尾留下一个孤零零的逗号顿号，直接去掉
+    text = re.sub(r"[，、；：,;:]+\s*$", "", text.strip())
     # 句号后面的空格去掉（中文里不用空格）
     text = re.sub(r"。\s+", "。", text)
     return text.strip()

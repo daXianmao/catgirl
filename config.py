@@ -141,6 +141,30 @@ DEFAULTS = {
     "asrModel": "qwen3-asr-flash",
     "asrBaseUrl": "",
     "asrApiKey": "",
+    # 手机桥接（真机方案）：安卓手机上跑官方 QQ 客户端 + 通知监听脚本，
+    # 由手机主动连过来，本进程当服务端。默认关闭，且默认只监听回环，
+    # 要跨机连（如 Tailscale 内网）才把 host 改成 0.0.0.0 或内网 IP。
+    "phoneEnabled": False,
+    "phoneHost": "127.0.0.1",
+    "phonePort": 8765,
+    "phoneToken": "",
+    "phonePrivate": True,
+    "phoneGroups": "",
+    # 群消息里没有 @ 信息，只能靠「文本里提到她的名字」判断是否在叫她
+    "phoneNameTrigger": True,
+    "phoneRate": 1.5,
+    "phoneMaxChars": 400,
+    # QQ 官方机器人（开放平台 OpenAPI v2）：不走逆向协议，零风控。
+    # 代价是群里必须 @ 才收得到消息，且只能被动回复（5 分钟内、同一消息最多 5 条）。
+    "qqbotEnabled": False,
+    "qqbotAppId": "",
+    "qqbotSecret": "",
+    # 机器人没上线时只有沙箱环境可用，所以默认先沙箱
+    "qqbotSandbox": True,
+    # 官方给的是 openid 不是 QQ 号，第一次对话从日志里抄进来
+    "qqbotOwnerOpenid": "",
+    "qqbotRate": 1.2,
+    "qqbotMaxChars": 400,
 }
 
 
@@ -257,6 +281,17 @@ def load_config(overrides=None):
         "CATGIRL_ASR_MODEL": "asrModel",
         "CATGIRL_ASR_BASE_URL": "asrBaseUrl",
         "CATGIRL_ASR_API_KEY": "asrApiKey",
+        "CATGIRL_PHONE_HOST": "phoneHost",
+        "CATGIRL_PHONE_PORT": "phonePort",
+        "CATGIRL_PHONE_TOKEN": "phoneToken",
+        "CATGIRL_PHONE_GROUPS": "phoneGroups",
+        "CATGIRL_PHONE_RATE": "phoneRate",
+        "CATGIRL_PHONE_MAX_CHARS": "phoneMaxChars",
+        "CATGIRL_QQBOT_APP_ID": "qqbotAppId",
+        "CATGIRL_QQBOT_SECRET": "qqbotSecret",
+        "CATGIRL_QQBOT_OWNER_OPENID": "qqbotOwnerOpenid",
+        "CATGIRL_QQBOT_RATE": "qqbotRate",
+        "CATGIRL_QQBOT_MAX_CHARS": "qqbotMaxChars",
     }
     for envName, key in envMap.items():
         value = _env(envName)
@@ -272,6 +307,16 @@ def load_config(overrides=None):
     cfg["qqNickname"] = _as_bool(_env("CATGIRL_QQ_NICKNAME", fileCfg.get("qqNickname")), True)
     cfg["qqRate"] = float(cfg["qqRate"] or 1.5)
     cfg["qqMaxChars"] = int(cfg["qqMaxChars"] or 400)
+    cfg["phoneEnabled"] = _as_bool(_env("CATGIRL_PHONE_ENABLED", fileCfg.get("phoneEnabled")), False)
+    cfg["phonePrivate"] = _as_bool(_env("CATGIRL_PHONE_PRIVATE", fileCfg.get("phonePrivate")), True)
+    cfg["phoneNameTrigger"] = _as_bool(_env("CATGIRL_PHONE_NAME_TRIGGER", fileCfg.get("phoneNameTrigger")), True)
+    cfg["phonePort"] = int(cfg["phonePort"] or 8765)
+    cfg["phoneRate"] = float(cfg["phoneRate"] or 1.5)
+    cfg["phoneMaxChars"] = int(cfg["phoneMaxChars"] or 400)
+    cfg["qqbotEnabled"] = _as_bool(_env("CATGIRL_QQBOT_ENABLED", fileCfg.get("qqbotEnabled")), False)
+    cfg["qqbotSandbox"] = _as_bool(_env("CATGIRL_QQBOT_SANDBOX", fileCfg.get("qqbotSandbox")), True)
+    cfg["qqbotRate"] = float(cfg["qqbotRate"] or 1.2)
+    cfg["qqbotMaxChars"] = int(cfg["qqbotMaxChars"] or 400)
     cfg["visionMaxImages"] = max(0, int(cfg.get("visionMaxImages") or 0))
     cfg["temperature"] = float(cfg["temperature"])
     cfg["maxTokens"] = int(cfg["maxTokens"])
@@ -332,5 +377,18 @@ def describe(cfg):
             "private": bool(cfg.get("qqPrivate")),
             "atOnly": bool(cfg.get("qqAtOnly")),
             "voice": bool(cfg.get("qqVoice")),
+        },
+        "phone": {
+            "enabled": bool(cfg.get("phoneEnabled")),
+            "addr": f"{cfg.get('phoneHost')}:{cfg.get('phonePort')}",
+            "hasToken": bool(cfg.get("phoneToken")),
+            "private": bool(cfg.get("phonePrivate")),
+            "groups": [g for g in str(cfg.get("phoneGroups") or "").replace("，", ",").split(",") if g.strip()],
+        },
+        "qqbot": {
+            "enabled": bool(cfg.get("qqbotEnabled")),
+            "appId": cfg.get("qqbotAppId") or "",
+            "hasSecret": bool(cfg.get("qqbotSecret")),
+            "sandbox": bool(cfg.get("qqbotSandbox")),
         },
     }

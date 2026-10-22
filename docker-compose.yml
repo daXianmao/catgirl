@@ -95,6 +95,53 @@ services:
       # 用 host-gateway 把宿主机的 3001 端口映射进容器
       - "host.docker.internal:host-gateway"
 
+  # QQ 官方机器人（推荐长期用）：走 QQ 开放平台 OpenAPI v2，腾讯认得你，不存在风控。
+  # 启动：sudo docker compose --profile official up -d qqbot
+  # 和上面的 qq（NapCat）是二选一，别同时开 —— 同一个群里会被回两遍。
+  qqbot:
+    build: .
+    image: catgirl:2.0
+    container_name: catgirl-qqbot
+    restart: unless-stopped
+    command: ["python", "qqbot.py"]
+    profiles: ["official"]
+    # 同 qq 服务：qqbot.py 不开 HTTP 端口，必须覆盖 Dockerfile 的 8000 健康检查
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if b'qqbot.py' in open('/proc/1/cmdline','rb').read() else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    environment:
+      CATGIRL_PROVIDER: ${CATGIRL_PROVIDER:-dashscope}
+      CATGIRL_API_KEY: ${CATGIRL_API_KEY:-}
+      CATGIRL_MODEL: ${CATGIRL_MODEL:-}
+      CATGIRL_EMBED_BASE_URL: ${CATGIRL_EMBED_BASE_URL:-}
+      CATGIRL_EMBED_API_KEY: ${CATGIRL_EMBED_API_KEY:-}
+      CATGIRL_EMBED_MODEL: ${CATGIRL_EMBED_MODEL:-}
+      CATGIRL_NAME: ${CATGIRL_NAME:-铃洛}
+      CATGIRL_DATA: /data
+      CATGIRL_TTS_PROVIDER: ${CATGIRL_TTS_PROVIDER:-edge}
+      CATGIRL_TTS_KEY: ${CATGIRL_TTS_KEY:-}
+      CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
+      CATGIRL_QQBOT_ENABLED: "true"
+      # q.qq.com 创建机器人后拿到的 AppID 和 AppSecret
+      CATGIRL_QQBOT_APP_ID: ${CATGIRL_QQBOT_APP_ID:-}
+      CATGIRL_QQBOT_SECRET: ${CATGIRL_QQBOT_SECRET:-}
+      # 机器人没上线前只有沙箱环境能用，先 true
+      CATGIRL_QQBOT_SANDBOX: ${CATGIRL_QQBOT_SANDBOX:-true}
+      # 官方给的是 openid 不是 QQ 号，第一次私聊后从日志抄进来就能被认成主人
+      CATGIRL_QQBOT_OWNER_OPENID: ${CATGIRL_QQBOT_OWNER_OPENID:-}
+      CATGIRL_QQBOT_RATE: ${CATGIRL_QQBOT_RATE:-1.2}
+      CATGIRL_QQBOT_MAX_CHARS: ${CATGIRL_QQBOT_MAX_CHARS:-400}
+      # 识图照旧可用：官方消息里的图片是 attachments 里的 URL，可以下载下来看
+      CATGIRL_VISION_MODEL: ${CATGIRL_VISION_MODEL:-qwen3.7-plus}
+      CATGIRL_VISION_BASE_URL: ${CATGIRL_VISION_BASE_URL:-}
+      CATGIRL_VISION_API_KEY: ${CATGIRL_VISION_API_KEY:-}
+    volumes:
+      - catgirl_data:/data
+      - ./persona.md:/app/persona.md:ro
+
   # QQ 协议端（Docker 版，备用方案）。
   # 默认不启用：推荐在宿主机用 NapCat Shell + systemd 跑协议端（见 06_napcat_native.sh），
   # 那个方案崩溃自动重启、日志可查、也更省内存。
