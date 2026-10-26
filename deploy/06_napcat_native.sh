@@ -31,6 +31,9 @@ if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
     DOCKER="sudo docker"
 fi
 
+SUDO=""
+[ "$(id -u)" -eq 0 ] || SUDO="sudo"
+
 INSTALL_DIR="${INSTALL_DIR:-$HOME/napcat}"
 APP_DIR="${APP_DIR:-$HOME/catgirl}"
 ONE_BOT_PORT="${ONE_BOT_PORT:-3001}"
@@ -75,8 +78,15 @@ else
     echo "失败"
   done
   [ -n "$GOT" ] || die "三个源都下不到安装脚本，请检查服务器能否访问 GitHub"
-  log "开始安装（要装 QQ 客户端本体，大概几分钟）..."
-  bash "$INSTALL_DIR/install.sh" --github-proxy 0 || die "安装脚本执行失败"
+  log "开始安装（会先用 apt 装依赖，再装 QQ 客户端本体，大概几分钟）..."
+  log "安装器必须 root：下面可能会要一次 sudo 密码"
+  # --github-proxy auto：让安装器自己探测可用线路（直连 / ghfast / ghproxy / gh-proxy / dpik）。
+  # 原来写死 0 是"直连 github.com"，这台机器连 raw 都超时，必然失败。
+  $SUDO bash "$INSTALL_DIR/install.sh" --github-proxy auto \
+    || die "安装器失败。若是提示「没有可用的 GitHub 下载线路」，把报错贴给铃铛，改用手动放包的方式"
+  # 安装器以 root 跑，产物归 root；NapCat 服务是以普通用户启动的，配置会写不进去
+  $SUDO chown -R "$(id -u):$(id -g)" "$INSTALL_DIR" 2>/dev/null || true
+  log "安装产物归属已改回 $(id -un)"
 fi
 
 [ -f "$INSTALL_DIR/launcher.sh" ] || die "装完没找到 launcher.sh，检查 $INSTALL_DIR 里的实际文件名"
@@ -86,8 +96,6 @@ ls -1 "$INSTALL_DIR" | head -20 | sed 's/^/    /'
 # ================================================================ 2. systemd 托管
 log ""
 log "=== 2. 注册 systemd 服务（崩溃自动重启）==="
-SUDO=""
-[ "$(id -u)" -eq 0 ] || SUDO="sudo"
 cat > /tmp/napcat.service <<EOF
 [Unit]
 Description=NapCat Shell (OneBot v11 协议端)
