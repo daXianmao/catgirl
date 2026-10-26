@@ -49,6 +49,12 @@ W_RECENCY = 0.10
 # 时间衰减半衰期（天）：30 天后新鲜度衰减到约 0.37
 RECENCY_HALF_LIFE_DAYS = 30.0
 
+# 长期事实（画像、喜好、约定）：淡得慢，而且有下限 —— 会变淡，但不会淡到想不起来。
+# 这就是「会淡忘但不是硬盘」和「重要的事记一辈子」之间的分界。
+LONG_TERM_KINDS = ("fact", "preference", "profile")
+LONG_TERM_FLOOR = 0.55
+LONG_TERM_IMPORTANCE = 4.8
+
 # 极性词表：nomic-embed-text 这类英文向量模型对中文否定几乎不敏感
 # （实测「主人讨厌香菜」和「主人喜欢香菜」余弦相似度 = 1.0），
 # 所以合并前必须做一次极性校验，否则会把相反的意思吞成一条。
@@ -99,6 +105,17 @@ class MemoryStore:
     def _recency(updatedAt, now):
         ageDays = max(0.0, (now - updatedAt) / 86400.0)
         return math.exp(-ageDays / RECENCY_HALF_LIFE_DAYS)
+
+    def _vitality(self, importance, kind, updatedAt, hits, now):
+        """这条记忆还剩多少浓度，0~1。
+
+        基数就是时间衰减（半衰期 30 天），被反复想起来的会清楚一点点（最多 +0.15）。
+        长期事实有下限，所以「他叫什么、爱吃三分糖」这类事永远不会淡到检索不到。
+        """
+        value = min(1.0, self._recency(updatedAt, now) + min(0.15, max(0, hits) * 0.02))
+        if kind in LONG_TERM_KINDS or importance >= LONG_TERM_IMPORTANCE:
+            value = max(value, LONG_TERM_FLOOR)
+        return value
 
     # ------------------------------------------------------------ 记忆写入/合并
     def add_memory(self, kind, content, importance=3.0, source="", vec=None, mergeThreshold=0.90):
@@ -187,10 +204,13 @@ class MemoryStore:
             vec = self._unpack(row["vec"])
             sim = self._cosine(queryVec, vec) if (vec and queryVec) else 0.0
             # 没有向量的记忆（向量服务失败时的兜底）只能靠重要性和新鲜度参与
+            vitality = self._vitality(
+                row["importance"], row["kind"], row["updated_at"], row["hits"], now
+            )
             score = (
                 W_SIMILARITY * sim
                 + W_IMPORTANCE * (row["importance"] / 5.0)
-                + W_RECENCY * self._recency(row["updated_at"], now)
+                + W_RECENCY * vitality
             )
             if not vec:
                 score *= 0.6
@@ -202,6 +222,7 @@ class MemoryStore:
                     "importance": row["importance"],
                     "updatedAt": row["updated_at"],
                     "hits": row["hits"],
+                    "vitality": vitality,
                     "similarity": sim,
                     "score": score,
                 }
@@ -242,7 +263,16 @@ class MemoryStore:
         params.append(limit)
         with self._lock:
             rows = self._conn.execute(sql, params).fetchall()
-        return [dict(row) for row in rows]
+        now = time.time()
+        items = []
+        for row in rows:
+            item = dict(row)
+            item["vitality"] = round(
+                self._vitality(row["importance"], row["kind"], row["updated_at"], row["hits"], now),
+                3,
+            )
+            items.append(item)
+        return items
 
     def forget(self, memoryId):
         with self._lock:
@@ -267,7 +297,9 @@ class MemoryStore:
             def score(row):
                 return (
                     0.60 * (row["importance"] / 5.0)
-                    + 0.30 * self._recency(row["updated_at"], now)
+                    + 0.30 * self._vitality(
+                        row["importance"], row["kind"], row["updated_at"], row["hits"], now
+                    )
                     + 0.10 * min(row["hits"] / 10.0, 1.0)
                 )
 

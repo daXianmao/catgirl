@@ -130,6 +130,20 @@ DEFAULTS = {
     "qqVoiceMode": "smart",
     "qqNickname": True,
     "ownerQq": "",
+    # 主动搭话：没人跟她说话的时候，她自己掷骰子决定要不要先开口。
+    # 只在私聊触发，且必须同时满足「安静够久 + 不在静默时段 + 今天没超次数 + 没有连续被晾着」。
+    # 掷骰子（random.random）不花 token，只有真开口那一轮才走模型。
+    "qqSpeakUp": False,
+    "qqSpeakUpChance": 0.15,     # 每轮掷骰子的命中概率
+    "qqSpeakUpEvery": 1800,      # 多久掷一次（秒）
+    "qqSpeakUpIdle": 3600,       # 上一次对话结束多久之后才允许开口（秒）
+    "qqSpeakUpDaily": 4,         # 每天最多主动开口几次
+    "qqSpeakUpQuiet": "1-8",     # 静默时段（小时，左闭右开；写 23-8 表示跨午夜）
+    "qqSpeakUpTarget": "",       # 对谁搭话；留空 = 主人（ownerQq）
+    # 心情：愉悦(v)/激动(a) 两个数，随时间回落到基线。
+    # 半衰期单位是分钟 —— 180 分钟 = 三小时后这份情绪只剩一半浓度。
+    "moodHalfLife": 180,
+    "moodInertia": 0.6,         # 新情绪替换旧情绪的力度，0=完全不改，1=完全覆盖
     # 图片识别：用多模态模型把 QQ 图片转成一句描述再过给主模型。
     # 留空 = 关闭（只发「［图片］」占位符）。baseUrl / apiKey 留空则复用主配置。
     "visionModel": "qwen3.7-plus",
@@ -274,6 +288,14 @@ def load_config(overrides=None):
         "CATGIRL_QQ_RATE": "qqRate",
         "CATGIRL_QQ_MAX_CHARS": "qqMaxChars",
         "CATGIRL_QQ_VOICE_MODE": "qqVoiceMode",
+        "CATGIRL_QQ_SPEAK_UP_CHANCE": "qqSpeakUpChance",
+        "CATGIRL_QQ_SPEAK_UP_EVERY": "qqSpeakUpEvery",
+        "CATGIRL_QQ_SPEAK_UP_IDLE": "qqSpeakUpIdle",
+        "CATGIRL_QQ_SPEAK_UP_DAILY": "qqSpeakUpDaily",
+        "CATGIRL_QQ_SPEAK_UP_QUIET": "qqSpeakUpQuiet",
+        "CATGIRL_QQ_SPEAK_UP_TARGET": "qqSpeakUpTarget",
+        "CATGIRL_MOOD_HALF_LIFE": "moodHalfLife",
+        "CATGIRL_MOOD_INERTIA": "moodInertia",
         "CATGIRL_OWNER_QQ": "ownerQq",
         "CATGIRL_VISION_MODEL": "visionModel",
         "CATGIRL_VISION_BASE_URL": "visionBaseUrl",
@@ -307,6 +329,13 @@ def load_config(overrides=None):
     cfg["qqNickname"] = _as_bool(_env("CATGIRL_QQ_NICKNAME", fileCfg.get("qqNickname")), True)
     cfg["qqRate"] = float(cfg["qqRate"] or 1.5)
     cfg["qqMaxChars"] = int(cfg["qqMaxChars"] or 400)
+    cfg["qqSpeakUp"] = _as_bool(_env("CATGIRL_QQ_SPEAK_UP", fileCfg.get("qqSpeakUp")), False)
+    cfg["qqSpeakUpChance"] = max(0.0, min(1.0, float(cfg["qqSpeakUpChance"] or 0.15)))
+    cfg["qqSpeakUpEvery"] = max(60, int(cfg["qqSpeakUpEvery"] or 1800))
+    cfg["qqSpeakUpIdle"] = max(300, int(cfg["qqSpeakUpIdle"] or 3600))
+    cfg["qqSpeakUpDaily"] = max(0, int(cfg["qqSpeakUpDaily"] or 4))
+    cfg["moodHalfLife"] = max(1.0, float(cfg["moodHalfLife"] or 180))
+    cfg["moodInertia"] = max(0.0, min(1.0, float(cfg["moodInertia"] or 0.6)))
     cfg["phoneEnabled"] = _as_bool(_env("CATGIRL_PHONE_ENABLED", fileCfg.get("phoneEnabled")), False)
     cfg["phonePrivate"] = _as_bool(_env("CATGIRL_PHONE_PRIVATE", fileCfg.get("phonePrivate")), True)
     cfg["phoneNameTrigger"] = _as_bool(_env("CATGIRL_PHONE_NAME_TRIGGER", fileCfg.get("phoneNameTrigger")), True)
@@ -377,6 +406,9 @@ def describe(cfg):
             "private": bool(cfg.get("qqPrivate")),
             "atOnly": bool(cfg.get("qqAtOnly")),
             "voice": bool(cfg.get("qqVoice")),
+            "speakUp": bool(cfg.get("qqSpeakUp")),
+            "speakUpEvery": cfg.get("qqSpeakUpEvery"),
+            "speakUpQuiet": cfg.get("qqSpeakUpQuiet"),
         },
         "phone": {
             "enabled": bool(cfg.get("phoneEnabled")),

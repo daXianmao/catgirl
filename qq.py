@@ -21,6 +21,7 @@ import asyncio
 import base64
 import json
 import os
+import random
 import re
 import time
 import urllib.request
@@ -231,6 +232,8 @@ class QQSession:
         self.lastSent = 0.0
         self.lastUsed = time.time()
         self.voiceMuteUntil = 0.0  # 对方喊停后，到这个时间点前都不发语音
+        self.lastSpokeUp = 0.0     # 上次主动搭话的时间
+        self.speakUpStreak = 0     # 连续几次主动搭话对方没接话（用来退避）
 
 
 class QQBot:
@@ -252,6 +255,17 @@ class QQBot:
         self.rate = float(cfg.get("qqRate") or 1.5)
         self.maxChars = int(cfg.get("qqMaxChars") or 400)
 
+        # 主动搭话：她自己掷骰子决定要不要先开口。掷骰子是本地随机，不花 token；
+        # 只有掷中之后那一轮才真的走模型
+        self.speakUpOn = bool(cfg.get("qqSpeakUp"))
+        self.speakUpChance = float(cfg.get("qqSpeakUpChance") or 0.15)
+        self.speakUpEvery = int(cfg.get("qqSpeakUpEvery") or 1800)
+        self.speakUpIdle = int(cfg.get("qqSpeakUpIdle") or 3600)
+        self.speakUpDaily = int(cfg.get("qqSpeakUpDaily") or 4)
+        self.speakUpQuiet = str(cfg.get("qqSpeakUpQuiet") or "1-8")
+        self.speakUpTarget = str(cfg.get("qqSpeakUpTarget") or "").strip() or self.ownerQq
+        self.speakUpTask = None
+
         rawGroups = str(cfg.get("qqGroups") or "").replace("，", ",")
         self.groups = {g.strip() for g in rawGroups.split(",") if g.strip()}
 
@@ -262,7 +276,7 @@ class QQBot:
         self.ws = None
         self.running = True
         self.semaphore = asyncio.Semaphore(4)  # 2G 小机器，别把上游打到限流
-        self.stats = {"收到": 0, "回复": 0, "忽略": 0, "失败": 0}
+        self.stats = {"收到": 0, "回复": 0, "忽略": 0, "失败": 0, "搭话": 0}
 
     # ------------------------------------------------------------ 会话与模型
     def session_for(self, kind, chatId, event):
@@ -275,7 +289,9 @@ class QQBot:
         else:
             userId = f"qq{chatId}"
             sessionId = f"p{chatId}"
+        return self._get_session(userId, sessionId)
 
+    def _get_session(self, userId, sessionId):
         existing = self.sessions.get(userId)
         if existing:
             existing.lastUsed = time.time()
@@ -296,6 +312,7 @@ class QQBot:
         core = CatgirlCore(self.cfg, dbPath=dbPath, session=sessionId)
         core.bootstrap()
         session = QQSession(core, userId)
+        session.lastSpokeUp = time.time()  # 进程刚起来时先别急着开口
         self.sessions[userId] = session
         return session
 
@@ -372,14 +389,15 @@ class QQBot:
             log(f"语音识别失败：{exc}")
             return ""
 
-    async def reply_text(self, session, userText):
+    async def reply_text(self, session, userText, hiddenText=None):
         """同步 core 丢进线程池，别堵死事件循环。
 
         返回 (回复文本, 元信息)；元信息里带这条回复的 mood，用来判断该不该发语音。
+        hiddenText 见 core.respond_iter：只改「历史里记什么」，不改模型看到的内容。
         """
         async with self.semaphore:
             try:
-                text, meta = await asyncio.to_thread(session.core.respond, userText)
+                text, meta = await asyncio.to_thread(session.core.respond, userText, hiddenText)
             except BrainError as exc:
                 self.stats["失败"] += 1
                 log(f"模型出错：{exc}")
@@ -510,6 +528,140 @@ class QQBot:
         if not sent or sent.get("status") in ("failed", "error"):
             log("语音发送失败（协议端可能不支持该格式），文字已发出")
 
+    # ------------------------------------------------------------ 主动搭话
+    @staticmethod
+    def _quiet_range(spec):
+        """把 "1-8" / "23-8" 解析成 (起, 止) 小时；解析不出来就当没设静默时段。"""
+        m = re.match(r"^\s*(\d{1,2})\s*[-~]\s*(\d{1,2})\s*$", str(spec or ""))
+        if not m:
+            return None
+        start, end = int(m.group(1)) % 24, int(m.group(2)) % 24
+        return None if start == end else (start, end)
+
+    def in_quiet_hours(self, hour=None):
+        """现在是不是她该闭嘴的时段（别半夜三点发消息）。支持跨午夜，如 23-8。"""
+        span = self._quiet_range(self.speakUpQuiet)
+        if not span:
+            return False
+        hour = time.localtime().tm_hour if hour is None else hour
+        start, end = span
+        if start < end:
+            return start <= hour < end
+        return hour >= start or hour < end
+
+    @staticmethod
+    def _part_of_day(hour):
+        if 5 <= hour < 8:
+            return "清早"
+        if 8 <= hour < 11:
+            return "上午"
+        if 11 <= hour < 13:
+            return "中午"
+        if 13 <= hour < 17:
+            return "下午"
+        if 17 <= hour < 19:
+            return "傍晚"
+        if 19 <= hour < 23:
+            return "晚上"
+        return "深夜"
+
+    @staticmethod
+    def _span_text(seconds):
+        """把秒数说成「43 分钟」「3 小时」，写进日志和提示词里。"""
+        minutes = int(seconds // 60)
+        if minutes < 90:
+            return f"{minutes} 分钟"
+        hours = minutes / 60
+        if hours < 24:
+            return f"{hours:.0f} 小时"
+        return f"{hours / 24:.0f} 天"
+
+    @staticmethod
+    def _speak_up_used(session):
+        """今天已经主动开口几次。计数存在她自己的记忆库里，进程重启也不会清零。"""
+        raw = str(session.core.store.get_kv("speakUpQuota", "") or "")
+        day, _, count = raw.partition(":")
+        if day != time.strftime("%Y-%m-%d"):
+            return 0
+        try:
+            return int(count)
+        except ValueError:
+            return 0
+
+    @staticmethod
+    def _bump_speak_up(session):
+        used = QQBot._speak_up_used(session) + 1
+        session.core.store.set_kv("speakUpQuota", f"{time.strftime('%Y-%m-%d')}:{used}")
+        return used
+
+    async def maybe_speak_up(self):
+        """定时器到点调一次：先过四道闸，最后才掷骰子，掷中了才花 token。
+
+        四道闸按代价从低到高排，任何一道不过就直接返回，一个 token 都不花：
+          1. 没开 / 没连上 / 不知道该对谁说话
+          2. 现在是她该安静的时段
+          3. 安静得还不够久（连续被晾着时，这个「够久」会翻倍）
+          4. 今天已经说够次数了
+        """
+        if not self.speakUpOn or self.ws is None or not self.speakUpTarget:
+            return
+        if self.in_quiet_hours():
+            return
+
+        target = self.speakUpTarget
+        session = self.sessions.get(f"qq{target}") or self._get_session(f"qq{target}", f"p{target}")
+
+        idle = time.time() - max(session.lastUsed, session.lastSpokeUp)
+        # 被晾过几次就等更久再开口：1 次翻倍、2 次四倍，最多八倍
+        needIdle = self.speakUpIdle * (2 ** min(session.speakUpStreak, 3))
+        if idle < needIdle:
+            return
+        if self._speak_up_used(session) >= self.speakUpDaily:
+            return
+
+        if random.random() > self.speakUpChance:
+            log(f"主动搭话：骰子没中（已安静 {self._span_text(idle)}）")
+            return
+
+        hour = time.localtime().tm_hour
+        hint = (
+            f"（{self._part_of_day(hour)}，主人已经 {self._span_text(idle)}没说话了，"
+            "聊天窗口一直安静着。你自己想找他说句话。"
+            "别提这条提示，别说「主动搭话」这四个字，别问「在吗」「在干嘛」，"
+            "直接说一句你此刻心里冒出来的话，两三句以内。）"
+        )
+        try:
+            async with session.lock:
+                reply, meta = await self.reply_text(
+                    session, hint, hiddenText="（安静了一会儿，你先开的口）"
+                )
+                # 出错时 reply_text 会回一句「（脑袋卡住了…）」，那种话不能主动发出去
+                if not reply or meta.get("error") or reply.startswith("（"):
+                    return
+                await self.send("private", target, reply, session)
+        except Exception as exc:
+            log(f"主动搭话失败：{exc!r}")
+            return
+
+        session.lastSpokeUp = time.time()
+        session.speakUpStreak += 1  # 先按「他没接话」记账，主人一说话就清零
+        used = self._bump_speak_up(session)
+        self.stats["搭话"] += 1
+        log(
+            f"主动搭话：已发给 {target}（今天第 {used}/{self.speakUpDaily} 次，"
+            f"安静了 {self._span_text(idle)}，连续第 {session.speakUpStreak} 次）"
+        )
+
+    async def speak_up_loop(self):
+        """后台定时器。先静一会儿再开始，别刚重启就开口。"""
+        await asyncio.sleep(min(300, self.speakUpEvery))
+        while self.running:
+            try:
+                await self.maybe_speak_up()
+            except Exception as exc:  # 这条后台线不能死，死了就永远不开口了
+                log(f"主动搭话异常：{exc!r}")
+            await asyncio.sleep(self.speakUpEvery)
+
     # ------------------------------------------------------------ 事件处理
     async def on_event(self, event):
         if event.get("post_type") != "message":
@@ -562,6 +714,7 @@ class QQBot:
             return
 
         session = self.session_for(kind, chatId, event)
+        session.speakUpStreak = 0  # 他说话了，主动搭话的退避重来
 
         # 图片识别：只处理明显针对她的（私聊，或群里 @ 了她），群里别人刷图不跟着烧额度。
         # 识别失败就退回「［图片］」占位符，不影响正常聊天
@@ -651,36 +804,52 @@ class QQBot:
         return f"{self.wsUrl}{sep}access_token={self.token}"
 
     async def run(self):
-        delay = 2
-        while self.running:
-            try:
-                log(f"连接协议端 {self.wsUrl}")
-                async with ws_connect(self.url(), **self.connect_kwargs()) as ws:
-                    self.ws = ws
-                    delay = 2
-                    # 必须先起接收循环，否则 call() 等应答时没人读 socket，只能等到超时
-                    pumpTask = asyncio.create_task(self.pump(ws))
-                    try:
-                        info = await self.call("get_login_info", {}, timeout=10)
-                        if info and info.get("data"):
-                            self.selfId = str(info["data"].get("user_id") or self.selfId)
-                            log(f"已登录：{info['data'].get('nickname')}（{self.selfId}）")
-                        log(
-                            f"就绪｜私聊 {'开' if self.privateOn else '关'}｜"
-                            f"群白名单 {sorted(self.groups) or '空（不接群）'}｜需@{'是' if self.atOnly else '否'}"
-                        )
-                        await pumpTask
-                    finally:
-                        pumpTask.cancel()
-            except asyncio.CancelledError:
-                raise
-            except Exception as exc:
-                log(f"连接断开（{type(exc).__name__}: {exc}），{delay}s 后重连")
-            finally:
-                self.ws = None
+        # 主动搭话是独立的一条后台线，跟 WS 连接的重连逻辑互不干扰：
+        # WS 断了它照样在跑，只是 maybe_speak_up 里发现 self.ws is None 就跳过
+        if self.speakUpOn and self.speakUpTarget:
+            self.speakUpTask = asyncio.create_task(self.speak_up_loop())
+            log(
+                f"主动搭话已开：每 {self.speakUpEvery // 60} 分钟掷一次骰子"
+                f"（{self.speakUpChance:.0%}），每天最多 {self.speakUpDaily} 次，"
+                f"要安静 {self.speakUpIdle // 60} 分钟以上，静默时段 {self.speakUpQuiet} 点"
+            )
+        elif self.speakUpOn:
+            log("主动搭话已开但不知道对谁开口：设 CATGIRL_OWNER_QQ 或 CATGIRL_QQ_SPEAK_UP_TARGET")
 
-            await asyncio.sleep(delay)
-            delay = min(delay * 2, 30)
+        delay = 2
+        try:
+            while self.running:
+                try:
+                    log(f"连接协议端 {self.wsUrl}")
+                    async with ws_connect(self.url(), **self.connect_kwargs()) as ws:
+                        self.ws = ws
+                        delay = 2
+                        # 必须先起接收循环，否则 call() 等应答时没人读 socket，只能等到超时
+                        pumpTask = asyncio.create_task(self.pump(ws))
+                        try:
+                            info = await self.call("get_login_info", {}, timeout=10)
+                            if info and info.get("data"):
+                                self.selfId = str(info["data"].get("user_id") or self.selfId)
+                                log(f"已登录：{info['data'].get('nickname')}（{self.selfId}）")
+                            log(
+                                f"就绪｜私聊 {'开' if self.privateOn else '关'}｜"
+                                f"群白名单 {sorted(self.groups) or '空（不接群）'}｜需@{'是' if self.atOnly else '否'}"
+                            )
+                            await pumpTask
+                        finally:
+                            pumpTask.cancel()
+                except asyncio.CancelledError:
+                    raise
+                except Exception as exc:
+                    log(f"连接断开（{type(exc).__name__}: {exc}），{delay}s 后重连")
+                finally:
+                    self.ws = None
+
+                await asyncio.sleep(delay)
+                delay = min(delay * 2, 30)
+        finally:
+            if self.speakUpTask:
+                self.speakUpTask.cancel()
 
 
 def main():
