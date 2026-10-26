@@ -19,6 +19,11 @@
 #   （脚本可重复执行，已装的步骤会跳过）
 set -uo pipefail
 
+# 脚本自己所在目录：一定要在脚本里先算成绝对路径。
+# 下面安装 Qt 时会 cd 到别的目录，那时再算 dirname "$0" 就跑到新目录去了，
+# 会导致 napcat_watchdog.sh 找不到、看门狗被静默跳过。
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+
 INSTALL_DIR="${INSTALL_DIR:-$HOME/napcat}"
 APP_DIR="${APP_DIR:-$HOME/catgirl}"
 ONE_BOT_PORT="${ONE_BOT_PORT:-3001}"
@@ -113,7 +118,7 @@ done
 # ================================================================ 3. 看门狗
 log ""
 log "=== 3. 装看门狗（进程活着但协议端没监听时自动重启）==="
-WATCH_SRC="$(dirname "$0")/napcat_watchdog.sh"
+WATCH_SRC="$SCRIPT_DIR/napcat_watchdog.sh"
 if [ -f "$WATCH_SRC" ]; then
   install -m 755 "$WATCH_SRC" "$HOME/napcat_watchdog.sh"
   cat > /tmp/napcat-watchdog.service <<EOF
