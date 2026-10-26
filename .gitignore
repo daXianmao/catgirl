@@ -16,3 +16,6 @@ config.json
 
 # ---- 日志 ----
 *.log
+
+# ---- 离线部署包（NapCat.Shell.zip 等，几十兆，不进版本库）----
+deploy/offline/

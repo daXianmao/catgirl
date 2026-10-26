@@ -62,28 +62,59 @@ if [ -f "$INSTALL_DIR/launcher.sh" ]; then
 else
   mkdir -p "$INSTALL_DIR" || die "建不了 $INSTALL_DIR"
   cd "$INSTALL_DIR" || die "进不去 $INSTALL_DIR"
-  INSTALLERS=(
-    "https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/main/install.sh"
-    "https://ghfast.top/https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/main/install.sh"
-    "https://cdn.jsdelivr.net/gh/NapNeko/napcat-linux-installer@main/install.sh"
-  )
-  GOT=""
-  for u in "${INSTALLERS[@]}"; do
-    printf '  试 %s ... ' "$u"
-    if curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o "$INSTALL_DIR/install.sh" 2>/dev/null && [ -s "$INSTALL_DIR/install.sh" ]; then
-      echo "OK"
-      GOT="$u"
-      break
-    fi
-    echo "失败"
-  done
-  [ -n "$GOT" ] || die "三个源都下不到安装脚本，请检查服务器能否访问 GitHub"
+  if [ -s "$INSTALL_DIR/install.sh" ]; then
+    log "已存在 install.sh（$(stat -c%s "$INSTALL_DIR/install.sh") 字节），跳过下载"
+  else
+    INSTALLERS=(
+      "https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/main/install.sh"
+      "https://ghfast.top/https://raw.githubusercontent.com/NapNeko/napcat-linux-installer/main/install.sh"
+      "https://cdn.jsdelivr.net/gh/NapNeko/napcat-linux-installer@main/install.sh"
+    )
+    GOT=""
+    for u in "${INSTALLERS[@]}"; do
+      printf '  试 %s ... ' "$u"
+      if curl -fsSL --connect-timeout 8 --max-time 60 "$u" -o "$INSTALL_DIR/install.sh" 2>/dev/null && [ -s "$INSTALL_DIR/install.sh" ]; then
+        echo "OK"
+        GOT="$u"
+        break
+      fi
+      echo "失败"
+    done
+    [ -n "$GOT" ] || die "三个源都下不到安装脚本，请检查服务器能否访问 GitHub"
+  fi
   log "开始安装（会先用 apt 装依赖，再装 QQ 客户端本体，大概几分钟）..."
   log "安装器必须 root：下面可能会要一次 sudo 密码"
-  # --github-proxy auto：让安装器自己探测可用线路（直连 / ghfast / ghproxy / gh-proxy / dpik）。
-  # 原来写死 0 是"直连 github.com"，这台机器连 raw 都超时，必然失败。
-  $SUDO bash "$INSTALL_DIR/install.sh" --github-proxy auto \
-    || die "安装器失败。若是提示「没有可用的 GitHub 下载线路」，把报错贴给铃铛，改用手动放包的方式"
+
+  # ---------------------------------------------------------------- 离线包优先
+  # 安装器的下载函数没有续传也没有重试，34MB 的包在十几 KB/s 的线路上必断。
+  # 但它支持本地包：当前目录有 NapCat.Shell.zip 就跳过下载；--launcher-source 可指定本地源码。
+  ARGS="--github-proxy auto"
+  if [ -f "$INSTALL_DIR/NapCat.Shell.zip" ]; then
+    ZIP_OK=1
+    if command -v unzip >/dev/null 2>&1; then
+      unzip -t "$INSTALL_DIR/NapCat.Shell.zip" >/dev/null 2>&1 || ZIP_OK=0
+    fi
+    if [ "$ZIP_OK" = "1" ]; then
+      log "发现本地安装包 NapCat.Shell.zip（$(stat -c%s "$INSTALL_DIR/NapCat.Shell.zip") 字节），跳过 GitHub 下载"
+      ARGS="--github-proxy 0"
+    else
+      log "!! 本地 NapCat.Shell.zip 校验不通过（多半没传完），将尝试重新下载"
+    fi
+  else
+    log "没找到本地 NapCat.Shell.zip，会尝试联网下载（慢线路可能中断）"
+  fi
+  if [ -s "$INSTALL_DIR/launcher.src.cpp" ]; then
+    log "发现本地 launcher.src.cpp（$(stat -c%s "$INSTALL_DIR/launcher.src.cpp") 字节），直接编译，不联网"
+    ARGS="$ARGS --launcher-source ./launcher.src.cpp"
+  fi
+  if [ -s "$INSTALL_DIR/QQ.deb" ]; then
+    log "发现本地 QQ.deb，跳过 LinuxQQ 下载"
+  fi
+  log "安装器参数：$ARGS"
+
+  # shellcheck disable=SC2086
+  $SUDO bash "$INSTALL_DIR/install.sh" $ARGS \
+    || die "安装器失败。若卡在下载，把 NapCat.Shell.zip 与 launcher.src.cpp 放进 $INSTALL_DIR 再重跑本脚本"
   # 安装器以 root 跑，产物归 root；NapCat 服务是以普通用户启动的，配置会写不进去
   $SUDO chown -R "$(id -u):$(id -g)" "$INSTALL_DIR" 2>/dev/null || true
   log "安装产物归属已改回 $(id -un)"
