@@ -24,6 +24,13 @@ set -uo pipefail
 # 会导致 napcat_watchdog.sh 找不到、看门狗被静默跳过。
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 
+# docker 前缀：Ubuntu 上普通用户默认不在 docker 组里，必须 sudo，
+# 否则下面诊断段全是空的、容器也停不掉（两个客户端登同一个 QQ 会互踢）。
+DOCKER="docker"
+if command -v docker >/dev/null 2>&1 && ! docker info >/dev/null 2>&1; then
+    DOCKER="sudo docker"
+fi
+
 INSTALL_DIR="${INSTALL_DIR:-$HOME/napcat}"
 APP_DIR="${APP_DIR:-$HOME/catgirl}"
 ONE_BOT_PORT="${ONE_BOT_PORT:-3001}"
@@ -35,10 +42,10 @@ die() { echo "[$(date +%H:%M:%S)] !! $*"; exit 1; }
 # ================================================================ 0. 诊断
 log "=== 0. 先看 Docker 版 NapCat 到底为什么挂 ==="
 if command -v docker >/dev/null 2>&1; then
-  docker ps -a --filter name=napcat --format '容器: {{.Names}}  状态: {{.Status}}' 2>/dev/null || true
-  docker inspect napcat --format '  退出码={{.State.ExitCode}}  OOM={{.State.OOMKilled}}  重启次数={{.RestartCount}}  镜像={{.Config.Image}}' 2>/dev/null || true
+  $DOCKER ps -a --filter name=napcat --format '容器: {{.Names}}  状态: {{.Status}}' 2>/dev/null || true
+  $DOCKER inspect napcat --format '  退出码={{.State.ExitCode}}  OOM={{.State.OOMKilled}}  重启次数={{.RestartCount}}  镜像={{.Config.Image}}' 2>/dev/null || true
   log "--- 最近 30 行日志（最后几行常见原因）---"
-  docker logs --tail 30 napcat 2>&1 | tail -30 || true
+  $DOCKER logs --tail 30 napcat 2>&1 | tail -30 || true
 else
   log "（这台机器没有 docker，跳过诊断）"
 fi
@@ -150,7 +157,12 @@ fi
 log ""
 log "=== 4. 停掉 Docker 版 NapCat（容器和数据卷都保留，随时能回退）==="
 if command -v docker >/dev/null 2>&1; then
-  docker stop napcat 2>/dev/null && log "Docker 版 napcat 已停止（没删除，回退用 docker start napcat）" || log "（没有正在跑的 Docker 版 napcat，跳过）"
+  $DOCKER stop napcat 2>/dev/null && log "Docker 版 napcat 已停止（没删除，回退用 sudo docker start napcat）" || log "（没有正在跑的 Docker 版 napcat，跳过）"
+  if [ -n "$($DOCKER ps -q --filter name=napcat 2>/dev/null)" ]; then
+    log "!! Docker 版 napcat 仍在运行：同一 QQ 号两个客户端会互踢，请手动 sudo docker stop napcat"
+  else
+    log "已确认 Docker 版不再运行（容器保留，随时可回退）"
+  fi
 fi
 
 # ================================================================ 5. 登录 + OneBot 配置
