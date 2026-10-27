@@ -52,8 +52,25 @@ fi
 # ================================================================ 2. 装 NapCat
 log ""
 log "=== 2. 安装 NapCat Shell ==="
-if [ -f "$NAPCAT_DIR/launcher.sh" ]; then
-    log "  已存在 $NAPCAT_DIR/launcher.sh，跳过安装"
+
+# 这套安装器（NapNeko/napcat-linux-installer）的产物是「外层启动器 + 内层实体」：
+#   ~/launcher.sh            启动器：cd 到自己所在目录，LD_PRELOAD 同目录的 .so 再拉起 /opt/QQ/qq
+#   ~/libnapcat_launcher.so  编译产物，启动器按 ./ 相对路径加载，必须和它同级
+#   ~/napcat/                NapCat 本体（napcat.mjs、node_modules、config）
+# 所以启动器不能搬进 ~/napcat，systemd 的工作目录必须是启动器所在的那个目录。
+find_launcher() {
+    local p
+    for p in "$HOME/launcher.sh" "$HOME/Launcher.sh" "$NAPCAT_DIR/launcher.sh" "$NAPCAT_DIR/Launcher.sh"; do
+        [ -f "$p" ] && { echo "$p"; return 0; }
+    done
+    p="$(find "$HOME" -maxdepth 3 -name '[Ll]auncher.sh' -not -path '*/node_modules/*' 2>/dev/null | head -n 1)"
+    [ -n "$p" ] && { echo "$p"; return 0; }
+    return 1
+}
+
+LAUNCHER="$(find_launcher || true)"
+if [ -n "$LAUNCHER" ]; then
+    log "  已存在启动器 $LAUNCHER，跳过安装"
 else
     mkdir -p "$NAPCAT_DIR"
     if [ ! -s "$NAPCAT_DIR/install.sh" ]; then
@@ -82,10 +99,16 @@ else
     # shellcheck disable=SC2086
     $SUDO bash "$NAPCAT_DIR/install.sh" $ARGS \
         || die "安装器失败。若卡在下载，把 NapCat.Shell.zip 放进 $NAPCAT_DIR 再重跑"
-    # 安装器以 root 跑，产物归 root；服务是普通用户起的，配置会写不进去
+    # 安装器以 root 跑，产物归 root；服务是普通用户起的，得把属主改回来
     $SUDO chown -R "$(id -u):$(id -g)" "$NAPCAT_DIR" 2>/dev/null || true
+    LAUNCHER="$(find_launcher || true)"
+    [ -n "$LAUNCHER" ] || die "安装完了仍找不到 Launcher.sh，手动看：ls -la $HOME $NAPCAT_DIR"
 fi
-[ -f "$NAPCAT_DIR/launcher.sh" ] || die "没找到 $NAPCAT_DIR/launcher.sh，看看实际解出来的文件名"
+
+LAUNCHER_DIR="$(cd "$(dirname "$LAUNCHER")" && pwd)"
+$SUDO chown "$(id -u):$(id -g)" "$LAUNCHER" 2>/dev/null || true
+$SUDO chown "$(id -u):$(id -g)" "$LAUNCHER_DIR/libnapcat_launcher.so" 2>/dev/null || true
+log "  启动器：$LAUNCHER（工作目录 $LAUNCHER_DIR）"
 
 # ================================================================ 3. systemd 托管 NapCat
 log ""
@@ -99,8 +122,8 @@ After=network-online.target
 [Service]
 Type=simple
 User=$(id -un)
-WorkingDirectory=$NAPCAT_DIR
-ExecStart=/usr/bin/bash $NAPCAT_DIR/launcher.sh
+WorkingDirectory=$LAUNCHER_DIR
+ExecStart=/usr/bin/bash $LAUNCHER
 Restart=on-failure
 RestartSec=5
 TimeoutStopSec=20
