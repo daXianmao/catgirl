@@ -78,6 +78,8 @@ class PhoneBridge:
         self.rate = float(cfg.get("phoneRate") or 1.5)
         self.maxChars = int(cfg.get("phoneMaxChars") or 400)
         self.ownerQq = str(cfg.get("ownerQq") or "").strip()
+        # 通知里没有 QQ 号，senderId 永远是空，所以只能靠昵称认主人
+        self.ownerName = str(cfg.get("phoneOwnerName") or "").strip()
 
         rawGroups = str(cfg.get("phoneGroups") or "").replace("，", ",")
         self.groups = {g.strip() for g in rawGroups.split(",") if g.strip()}
@@ -123,6 +125,16 @@ class PhoneBridge:
         return session
 
     # ------------------------------------------------------------ 消息处理
+    def is_owner(self, senderId, sender):
+        """这条消息是不是主人发的。
+
+        QQ 号优先（有就用，最准）；通知路线拿不到 QQ 号，
+        这时候退到昵称比对——所以 .env 里的 CATGIRL_PHONE_OWNER_NAME 要和手机 QQ 昵称一致。
+        """
+        if senderId and self.ownerQq and senderId == self.ownerQq:
+            return True
+        return bool(self.ownerName) and sender.strip() == self.ownerName
+
     def should_answer_group(self, gid, text, senderId):
         """群消息要不要回。白名单空 = 不接任何群；写 * = 接所有群。"""
         if not self.groups:
@@ -167,13 +179,11 @@ class PhoneBridge:
         session = self.session_for(kind, chatId, senderId)
 
         # 和 qq.py 保持一致的称呼：群聊带「说话人：」，主人单独标出来
+        owner = self.is_owner(senderId, sender)
         if kind == "group":
-            if self.ownerQq and senderId == self.ownerQq:
-                userText = f"主人（{sender}）：{text}"
-            else:
-                userText = f"{sender}：{text}"
+            userText = f"主人（{sender}）：{text}" if owner else f"{sender}：{text}"
         else:
-            userText = f"主人（{sender}）：{text}" if (self.ownerQq and senderId == self.ownerQq) else text
+            userText = f"主人（{sender}）：{text}" if owner else text
 
         # 简易指令：重置上下文（长期记忆保留）
         if text in ("/reset", "重置", "新会话"):

@@ -21,15 +21,18 @@
 
 // ============================ 配置 ============================
 var CONFIG = {
-    // 服务器地址。手机连家里/公司网络时写服务器内网 IP 或 Tailscale 分配的 IP
-    serverUrl: "ws://100.x.x.x:8765",
+    // 服务器地址：手机走公网就连服务器公网 IP；同一局域网写内网 IP。
+    // 端口要和 docker-compose 里 phone 服务映射的一致（默认 8765）
+    serverUrl: "ws://你的服务器公网IP:8765",
     // 跟服务器 .env 的 CATGIRL_PHONE_TOKEN 一致；留空表示不校验（只在本地调试用）
     token: "改成一个随机串",
-    // 群名列表：标题（通知标题）出现在这里的，才当作群消息。
-    // 注意：通知里拿不到群号，只能用群名称匹配，改群名前记得同步
-    groupNames: ["猫窝", "测试群"],
+    // 群名列表：通知标题（群名）出现在这里的，才当作群消息。
+    // 通知里拿不到群号，只能用群名匹配，改群名前记得同步；写 ["*"] 表示所有群
+    groupNames: ["猫窝"],
     // 通知文本里出现「昵称：内容」这种格式时，也按群消息处理（兜住漏配的群）
     sniffGroupByColon: true,
+    // 服务器那边认主人也是靠昵称（CATGIRL_PHONE_OWNER_NAME），这里只是方便看日志
+    ownerName: "主人的QQ昵称",
     // 只把能识别的会话上报；false = 所有 QQ 通知都上报（调试用）
     strictGroups: true
 };
@@ -153,11 +156,57 @@ function sendInCurrentChat(text) {
     return true;
 }
 
-/** 回复一条消息：先确认当前页面对应的是哪个会话，再输入 */
-function reply(payload) {
+// 每个会话最近一条通知。回复时点它等于「用户点通知」，能准确切到对应聊天窗口
+var chatNotifications = {};
+
+/** 切换到指定会话。拿不到通知缓存就只能在当前窗口发（有发错窗口的风险） */
+function openChat(chat) {
+    var n = chatNotifications[chat];
+    if (!n) {
+        log("没有 " + chat + " 的通知缓存，就在当前窗口发");
+        return false;
+    }
+    try {
+        n.click();
+        sleep(1200);
+        return true;
+    } catch (e) {
+        log("打开会话失败：" + e);
+        return false;
+    }
+}
+
+// 串行发送队列：几条回复同时到达时，界面来不及切换会把话发到别人窗口里
+var sendQueue = [];
+var sending = false;
+
+function enqueueReply(payload) {
+    sendQueue.push(payload);
+    if (!sending) {
+        sending = true;
+        threads.start(drainQueue);
+    }
+}
+
+function drainQueue() {
+    while (sendQueue.length > 0) {
+        var payload = sendQueue.shift();
+        try {
+            doReply(payload);
+        } catch (e) {
+            log("发送出错：" + e);
+        }
+        sleep(600);
+    }
+    sending = false;
+}
+
+/** 真正执行一条回复：切窗口 → 逐段输入发送 */
+function doReply(payload) {
     var chunks = payload.chunks || [];
     if (chunks.length === 0) return;
     log("回复 " + payload.chat + "：" + chunks.join(" / "));
+    openChat(payload.chat);
     for (var i = 0; i < chunks.length; i++) {
         if (!sendInCurrentChat(chunks[i])) break;
         sleep(800);
@@ -187,10 +236,8 @@ function connect() {
         if (data.type === "welcome") {
             log("服务器已接受：" + data.name);
         } else if (data.type === "reply") {
-            // 网络回调不是 UI 线程，切到主线程再操作界面
-            ui.run(function () {
-                try { reply(data); } catch (e) { log("发送出错：" + e); }
-            });
+            // 发送要切窗口 + 模拟点击，扔进串行队列，别堵住网络回调
+            enqueueReply(data);
         } else if (data.type === "pong") {
             // 心跳回执，忽略
         }
@@ -222,6 +269,7 @@ events.on("notification", function (n) {
 
     var msg = parseNotification(n);
     if (!msg) return;
+    chatNotifications[msg.chat] = n;  // 回复时靠它切回这个会话
     log("收到 " + msg.chat + " ｜ " + msg.sender + "：" + msg.text);
 
     // 先把这个会话打开，回复才不会发错窗口
@@ -246,5 +294,11 @@ setInterval(function () {
 }, 30000);
 
 connect();
+// 无障碍点击在锁屏下点不了，保持屏幕常亮（插着电跑，别用主力机）
+try {
+    device.keepScreenOn(24 * 3600 * 1000);
+} catch (e) {
+    log("设置常亮失败：" + e);
+}
 log("铃洛手机桥已启动");
 setInterval(function () { }, 1000);  // 保活，别让脚本自行退出

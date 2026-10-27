@@ -164,6 +164,9 @@ DEFAULTS = {
     "phoneToken": "",
     "phonePrivate": True,
     "phoneGroups": "",
+    # 通知里拿不到 QQ 号，只能靠昵称认人。填主人的 QQ 昵称，
+    # 命中就当成主人在说话（会加上「主人（昵称）：」前缀，语气/记忆都按主人走）
+    "phoneOwnerName": "",
     # 群消息里没有 @ 信息，只能靠「文本里提到她的名字」判断是否在叫她
     "phoneNameTrigger": True,
     "phoneRate": 1.5,
@@ -307,6 +310,7 @@ def load_config(overrides=None):
         "CATGIRL_PHONE_PORT": "phonePort",
         "CATGIRL_PHONE_TOKEN": "phoneToken",
         "CATGIRL_PHONE_GROUPS": "phoneGroups",
+        "CATGIRL_PHONE_OWNER_NAME": "phoneOwnerName",
         "CATGIRL_PHONE_RATE": "phoneRate",
         "CATGIRL_PHONE_MAX_CHARS": "phoneMaxChars",
         "CATGIRL_QQBOT_APP_ID": "qqbotAppId",
@@ -415,6 +419,7 @@ def describe(cfg):
             "addr": f"{cfg.get('phoneHost')}:{cfg.get('phonePort')}",
             "hasToken": bool(cfg.get("phoneToken")),
             "private": bool(cfg.get("phonePrivate")),
+            "ownerName": cfg.get("phoneOwnerName") or "",
             "groups": [g for g in str(cfg.get("phoneGroups") or "").replace("，", ",").split(",") if g.strip()],
         },
         "qqbot": {

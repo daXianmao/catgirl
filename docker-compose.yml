@@ -152,6 +152,60 @@ services:
       - catgirl_data:/data
       - ./persona.md:/app/persona.md:ro
 
+  # 手机桥接（真机方案）：手机上跑官方 QQ 客户端 + AutoX.js 脚本（deploy/phone_autojs.js），
+  # 由手机主动连过来，本服务当 WebSocket 服务端。设备指纹、客户端、网络全是「真的」，
+  # 风控基本不会找上门。代价：通知里只有文字，图片/语音拿不到。
+  # 启动：sudo docker compose --profile phone up -d phone
+  phone:
+    build: .
+    image: catgirl:2.0
+    container_name: catgirl-phone
+    restart: unless-stopped
+    command: ["python", "phone.py"]
+    profiles: ["phone"]
+    healthcheck:
+      test: ["CMD", "python", "-c", "import sys; sys.exit(0 if b'phone.py' in open('/proc/1/cmdline','rb').read() else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 15s
+    ports:
+      # 手机在公网/移动网络里，必须映射出去；安全组记得只放行 8765 给需要的来源
+      - "${CATGIRL_PHONE_PORT:-8765}:8765"
+    environment:
+      CATGIRL_PROVIDER: ${CATGIRL_PROVIDER:-dashscope}
+      CATGIRL_API_KEY: ${CATGIRL_API_KEY:-}
+      CATGIRL_MODEL: ${CATGIRL_MODEL:-}
+      CATGIRL_EMBED_BASE_URL: ${CATGIRL_EMBED_BASE_URL:-}
+      CATGIRL_EMBED_API_KEY: ${CATGIRL_EMBED_API_KEY:-}
+      CATGIRL_EMBED_MODEL: ${CATGIRL_EMBED_MODEL:-}
+      CATGIRL_NAME: ${CATGIRL_NAME:-铃洛}
+      CATGIRL_DATA: /data
+      CATGIRL_TTS_PROVIDER: ${CATGIRL_TTS_PROVIDER:-edge}
+      CATGIRL_TTS_KEY: ${CATGIRL_TTS_KEY:-}
+      CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
+      CATGIRL_VISION_MODEL: ${CATGIRL_VISION_MODEL:-qwen3.7-plus}
+      CATGIRL_VISION_BASE_URL: ${CATGIRL_VISION_BASE_URL:-}
+      CATGIRL_VISION_API_KEY: ${CATGIRL_VISION_API_KEY:-}
+      CATGIRL_PHONE_ENABLED: "true"
+      # 容器内必须监听 0.0.0.0，否则端口映射进来没人接
+      CATGIRL_PHONE_HOST: "0.0.0.0"
+      CATGIRL_PHONE_PORT: "8765"
+      # 手机端脚本里的 token 必须和这里一致，否则握手直接被拒
+      CATGIRL_PHONE_TOKEN: ${CATGIRL_PHONE_TOKEN:-}
+      CATGIRL_PHONE_PRIVATE: ${CATGIRL_PHONE_PRIVATE:-true}
+      # 群白名单写群名（通知里拿不到群号），逗号分隔，* = 所有群
+      CATGIRL_PHONE_GROUPS: ${CATGIRL_PHONE_GROUPS:-}
+      # 通知里没有 QQ 号，靠昵称认主人
+      CATGIRL_PHONE_OWNER_NAME: ${CATGIRL_PHONE_OWNER_NAME:-}
+      # true = 群里要提到她的名字才接话（通知里没有 @ 信息）
+      CATGIRL_PHONE_NAME_TRIGGER: ${CATGIRL_PHONE_NAME_TRIGGER:-true}
+      CATGIRL_PHONE_RATE: ${CATGIRL_PHONE_RATE:-1.5}
+      CATGIRL_PHONE_MAX_CHARS: ${CATGIRL_PHONE_MAX_CHARS:-400}
+    volumes:
+      - catgirl_data:/data
+      - ./persona.md:/app/persona.md:ro
+
   # QQ 协议端（Docker 版，备用方案）。
   # 默认不启用：推荐在宿主机用 NapCat Shell + systemd 跑协议端（见 06_napcat_native.sh），
   # 那个方案崩溃自动重启、日志可查、也更省内存。
