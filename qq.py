@@ -107,13 +107,27 @@ def tidy_punctuation(text):
 
 
 def forQQ(text):
-    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号、清符号。"""
+    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号、清符号。
+
+    模型爱写「（动作描写）\\n台词」这种剧本格式。括号删掉后每行都会剩一个空壳，
+    还带着行首的「，」「——」这类孤儿标点，看着像句子被从中间截断。这里按行收一遍，
+    只留真正的台词。
+    """
     text = STATE_TAG.sub("", text or "")
     text = BRACKETS.sub("", text)
     text = MD_MARKS.sub("", text)
     text = tidy_punctuation(text)
+
+    lines = []
+    for line in text.split("\n"):
+        line = line.strip(" \t　")
+        # 括号/省略号被清掉后，行首常剩下孤零零的标点，直接剃掉
+        line = re.sub(r"^[，、；：,;:—–…\.]+", "", line).strip(" \t　")
+        if line:
+            lines.append(line)
+    text = "\n".join(lines)
+
     text = re.sub(r"[ \t　]{2,}", " ", text)
-    text = re.sub(r"\n[ \t　]*\n+", "\n", text)  # 括号删除后可能留下空行
     return text.strip()
 
 
@@ -487,7 +501,10 @@ class QQBot:
 
     async def send_voice(self, kind, chatId, text, userId):
         """把回复合成语音发出去。优先给协议端本地路径（同一卷），
-        失败再退 base64（协议端多半支持 base64://，代价是消息变大）。"""
+        失败再退 base64（协议端多半支持 base64://，代价是消息变大）。
+
+        返回是否真的发出去了：成功了上层就不再发文字，免得同一句话听到两遍。
+        """
         # 对方点名要语音时允许念长一点，但别把整篇小作文都塞进一条语音
         limit = VOICE_REQUEST_LIMIT
         if len(text) > limit:
@@ -499,13 +516,13 @@ class QQBot:
                     break
             text = cut.strip()
         if not text:
-            return
+            return False
         try:
             engine = TTS(self.cfg, os.path.join(self.cfg["dataDir"], "users", userId, "voice"))
             result = await asyncio.to_thread(engine.synthesize, text)
         except (TTSError, Exception) as exc:
-            log(f"语音合成失败，已只发文字：{exc}")
-            return
+            log(f"语音合成失败，改发文字：{exc}")
+            return False
 
         action = "send_group_msg" if kind == "group" else "send_private_msg"
         key = "group_id" if kind == "group" else "user_id"
@@ -514,7 +531,7 @@ class QQBot:
         fileUri = "file://" + os.path.abspath(result["path"]).replace("\\", "/")
         sent = await self.call(action, {key: chatId, "message": [{"type": "record", "data": {"file": fileUri}}]})
         if sent and sent.get("status") not in ("failed", "error"):
-            return
+            return True
 
         # 本地路径这招不行就改 base64，彻底摆脱路径/挂载/权限问题
         try:
@@ -522,11 +539,13 @@ class QQBot:
                 raw = handle.read()
         except OSError as exc:
             log(f"读语音文件失败：{exc}")
-            return
+            return False
         b64Uri = "base64://" + base64.b64encode(raw).decode("ascii")
         sent = await self.call(action, {key: chatId, "message": [{"type": "record", "data": {"file": b64Uri}}]})
         if not sent or sent.get("status") in ("failed", "error"):
-            log("语音发送失败（协议端可能不支持该格式），文字已发出")
+            log("语音发送失败（协议端可能不支持该格式），改发文字")
+            return False
+        return True
 
     # ------------------------------------------------------------ 主动搭话
     @staticmethod
@@ -759,13 +778,16 @@ class QQBot:
 
         async with session.lock:
             reply, meta = await self.reply_text(session, userText)
-            await self.send(kind, chatId, reply, session)
             wantVoice, why = self.voice_decision(
                 kind, rawText, reply, meta, session, bool(records)
             )
             if wantVoice:
                 log(f"发语音（{why}）")
-                await self.send_voice(kind, chatId, reply, session.key)
+                # 语音发成功就不再补一条文字，否则同一句话会被听到、又被看到
+                if await self.send_voice(kind, chatId, reply, session.key):
+                    session.lastSent = time.time()
+                    return
+            await self.send(kind, chatId, reply, session)
 
     # ------------------------------------------------------------ 连接
     async def pump(self, ws):
