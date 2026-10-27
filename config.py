@@ -283,6 +283,11 @@ def load_config(overrides=None):
         "CATGIRL_SOVITS_URL": "sovitsBaseUrl",
         "CATGIRL_SOVITS_REF": "sovitsRefAudio",
         "CATGIRL_SOVITS_REF_TEXT": "sovitsRefText",
+        "CATGIRL_SOVITS_REF_LANG": "sovitsRefLang",
+        # 留空＝按文本长度自动选切分方式（60 字以内整段、以上四句一切）
+        "CATGIRL_SOVITS_CUT": "sovitsCut",
+        "CATGIRL_SOVITS_TEMP": "sovitsTemperature",
+        "CATGIRL_SOVITS_TOPK": "sovitsTopK",
         "CATGIRL_QQ_WS": "qqWsUrl",
         "CATGIRL_QQ_TOKEN": "qqToken",
         "CATGIRL_QQ_PROXY": "qqProxy",

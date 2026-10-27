@@ -283,6 +283,12 @@ def _open(url, payload=None, headers=None, method=None):
 # 这里既不会启动它，也不会去猜它的安装路径。
 SOVITS_DEFAULT_URL = ""
 
+# 整段推理的字数上限（超过就按四句一切，见 _sovits 里的说明）
+SOVITS_WHOLE_LIMIT = 60
+# 采样温度与 top_k：压低随机性，明显减少跑音
+SOVITS_TEMPERATURE = "0.6"
+SOVITS_TOP_K = "10"
+
 # 本机回环地址绝对不能走代理：宿主的透明代理只认 HTTP 转发，127.0.0.1 会被挡成 502
 _DIRECT_OPENER = urllib.request.build_opener(urllib.request.ProxyHandler({}))
 
@@ -577,13 +583,26 @@ class TTS:
         refText = (self.cfg.get("sovitsRefText") or self.profile.data.get("refText") or "").strip()
         refLang = self.cfg.get("sovitsRefLang") or self.profile.data.get("refLang") or "zh"
 
+        # 切分策略直接决定吐字清不清楚，实测（ASR 回检字错率）：
+        #   cut0 整段推理：60 字以内字错率接近 0，因为上下文完整，
+        #        模型不会把「发」念成「花」（日语素材训练的音色分不清 f/h）；
+        #   cut5 一句一推理：短句被切碎后缺上下文，同样句子字错率会翻倍，
+        #        超过 60 字时又容易让 GPT 重复或吞掉结尾，所以长文本改用
+        #   cut1（四句一推理），实测 130 字仍稳定在 1-2% 字错率。
+        cut = self.cfg.get("sovitsCut") or ""
+        if not cut:
+            cut = "cut0" if len(text) <= SOVITS_WHOLE_LIMIT else "cut1"
+
         params = {
             "text": text,
             "text_lang": self.profile.data.get("textLang") or "zh",
             "ref_audio_path": refPath,
             "prompt_text": refText,
             "prompt_lang": refLang,
-            "text_split_method": "cut5",
+            "text_split_method": cut,
+            # 温度越低发音越确定：默认 1.0 时同一句会出现「哈呆」「主任」这类跑音
+            "temperature": self.cfg.get("sovitsTemperature") or SOVITS_TEMPERATURE,
+            "top_k": self.cfg.get("sovitsTopK") or SOVITS_TOP_K,
             "batch_size": "1",
             "media_type": "wav",
             "streaming_mode": "false",

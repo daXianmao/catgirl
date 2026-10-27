@@ -23,11 +23,22 @@ services:
       CATGIRL_TTS_PROVIDER: ${CATGIRL_TTS_PROVIDER:-edge}
       CATGIRL_TTS_KEY: ${CATGIRL_TTS_KEY:-}
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
+      # 自建 GPT-SoVITS：跑在笔记本上，经 SSH 反向隧道映射到宿主机 9880
+      CATGIRL_SOVITS_URL: ${CATGIRL_SOVITS_URL:-}
+      CATGIRL_SOVITS_REF: ${CATGIRL_SOVITS_REF:-}
+      CATGIRL_SOVITS_REF_TEXT: ${CATGIRL_SOVITS_REF_TEXT:-}
+      CATGIRL_SOVITS_REF_LANG: ${CATGIRL_SOVITS_REF_LANG:-ja}
+      CATGIRL_SOVITS_CUT: ${CATGIRL_SOVITS_CUT:-}
+      CATGIRL_SOVITS_TEMP: ${CATGIRL_SOVITS_TEMP:-}
+      CATGIRL_SOVITS_TOPK: ${CATGIRL_SOVITS_TOPK:-}
     volumes:
       - catgirl_data:/data
       # 热挂载人格文件：改完只需 docker compose restart，不用重建镜像
       - ./persona.md:/app/persona.md:ro
       - ./assets/emoji:/app/assets/emoji:ro
+    extra_hosts:
+      # 语音服务跑在宿主机（隧道转发），容器要用 host-gateway 才能连到 9880
+      - "host.docker.internal:host-gateway"
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
       interval: 30s
@@ -66,6 +77,14 @@ services:
       CATGIRL_TTS_PROVIDER: ${CATGIRL_TTS_PROVIDER:-edge}
       CATGIRL_TTS_KEY: ${CATGIRL_TTS_KEY:-}
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
+      # 自建 GPT-SoVITS：跑在笔记本上，经 SSH 反向隧道映射到宿主机 9880
+      CATGIRL_SOVITS_URL: ${CATGIRL_SOVITS_URL:-}
+      CATGIRL_SOVITS_REF: ${CATGIRL_SOVITS_REF:-}
+      CATGIRL_SOVITS_REF_TEXT: ${CATGIRL_SOVITS_REF_TEXT:-}
+      CATGIRL_SOVITS_REF_LANG: ${CATGIRL_SOVITS_REF_LANG:-ja}
+      CATGIRL_SOVITS_CUT: ${CATGIRL_SOVITS_CUT:-}
+      CATGIRL_SOVITS_TEMP: ${CATGIRL_SOVITS_TEMP:-}
+      CATGIRL_SOVITS_TOPK: ${CATGIRL_SOVITS_TOPK:-}
       CATGIRL_QQ_ENABLED: "true"
       # 协议端地址：
       #   协议端跑在宿主机（NapCat Shell + systemd）→ ws://host.docker.internal:3001
