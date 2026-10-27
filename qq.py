@@ -50,6 +50,32 @@ STATE_TAG = re.compile(r"<state\s[^>]*/?>", re.S)
 BRACKETS = re.compile(r"［[^［］]*］|\[[^\[\]]*\]|（[^（）]*）|\([^()]*\)")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
 
+# ------------------------------------------------------------ 表情包
+# 模型在回复里写 <emoji name="baka"/> 就附带发一张图。名字必须在表里，
+# 编一个不存在的名字不会发任何东西，避免静默出错。
+EMOJI_TAG = re.compile(r"<emoji\s+name=[\"']?([a-z_]+)[\"']?\s*/?>", re.I)
+EMOJI_DIR = os.path.join(BASE_DIR, "assets", "emoji")
+EMOJI_FILES = {
+    "kuku": "01_kuku.jpg",           # 库库库……（得意偷笑）
+    "baka": "02_baka.jpg",           # 笨蛋！变态！
+    "godplay": "03_godplay.jpg",     # 这是神之操作
+    "curse_you": "04_curse_you.jpg", # 诅咒你喔！
+    "disgust": "05_disgust.jpg",     # 恶心。
+    "eat": "06_eat.jpg",             # 趁热吃吧。
+    "surprise": "07_surprise.jpg",   # 诶！？！？
+    "asexpected": "08_asexpected.jpg",  # 不愧是我。
+    "destiny": "09_destiny.jpg",     # 命运的指引。
+    "shoot": "10_shoot.jpg",         # 正在取材……
+    "explode": "11_explode.jpg",     # 现充都爆炸吧！
+    "accompany": "12_accompany.jpg",  # 那个…能陪我吗
+    "elegant": "13_elegant.jpg",     # 优雅。
+    "stayaway": "14_stayaway.jpg",   # 别过来。
+    "ha": "15_ha.jpg",               # 哈——！
+    "curse": "16_curse.jpg",         # 这是诅咒哦。
+}
+EMOJI_COOLDOWN = 40  # 同一会话两张表情之间至少隔这么久，别刷屏
+
+
 # ------------------------------------------------------------ 语音触发词
 # 语音不是每句话都发，只在「有必要」的时候发。三种情况：
 #   1. 对方明确要：发语音 / 念出来 / 说来听听
@@ -465,6 +491,55 @@ class QQBot:
             if index < len(chunks) - 1:
                 await asyncio.sleep(0.4)
 
+    def take_emoji(self, reply, session):
+        """把 <emoji name="x"/> 从回复里摘出来，返回 (干净文本, 表情名)。
+
+        模型偶尔会写错名字、或者一口气写好几个，这里只认表里的第一个，
+        再按会话控制间隔，免得每句都甩图。
+        """
+        if not reply:
+            return reply, None
+        name = None
+        for match in EMOJI_TAG.finditer(reply):
+            candidate = match.group(1).lower()
+            if candidate in EMOJI_FILES:
+                name = candidate
+                break
+        cleaned = EMOJI_TAG.sub("", reply)
+        # 标签单独占一行时，删掉会留下空行，顺手收掉
+        cleaned = "\n".join(line for line in cleaned.split("\n") if line.strip()).strip()
+        if not name:
+            return cleaned, None
+        now = time.time()
+        if now - getattr(session, "lastEmoji", 0.0) < EMOJI_COOLDOWN:
+            return cleaned, None
+        session.lastEmoji = now
+        return cleaned, name
+
+    async def send_image(self, kind, chatId, name):
+        """发一张表情包。走 base64，不依赖协议端能不能读到容器里的路径。"""
+        fileName = EMOJI_FILES.get(name)
+        if not fileName:
+            return False
+        path = os.path.join(EMOJI_DIR, fileName)
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read()
+        except OSError as exc:
+            log(f"读表情失败（{name}）：{exc}")
+            return False
+        action = "send_group_msg" if kind == "group" else "send_private_msg"
+        key = "group_id" if kind == "group" else "user_id"
+        uri = "base64://" + base64.b64encode(raw).decode("ascii")
+        result = await self.call(
+            action, {key: chatId, "message": [{"type": "image", "data": {"file": uri}}]}
+        )
+        if result and result.get("status") in ("failed", "error"):
+            log(f"表情发送失败：{str(result)[:140]}")
+            return False
+        log(f"发表情：{name}")
+        return True
+
     def voice_decision(self, kind, rawText, reply, meta, session, hasVoiceMsg=False):
         """这一轮要不要额外发一条语音？返回 (要发, 原因)。
 
@@ -778,6 +853,7 @@ class QQBot:
 
         async with session.lock:
             reply, meta = await self.reply_text(session, userText)
+            reply, emojiName = self.take_emoji(reply, session)
             wantVoice, why = self.voice_decision(
                 kind, rawText, reply, meta, session, bool(records)
             )
@@ -786,8 +862,12 @@ class QQBot:
                 # 语音发成功就不再补一条文字，否则同一句话会被听到、又被看到
                 if await self.send_voice(kind, chatId, reply, session.key):
                     session.lastSent = time.time()
+                    if emojiName:
+                        await self.send_image(kind, chatId, emojiName)
                     return
             await self.send(kind, chatId, reply, session)
+            if emojiName:
+                await self.send_image(kind, chatId, emojiName)
 
     # ------------------------------------------------------------ 连接
     async def pump(self, ws):

@@ -27,6 +27,7 @@ services:
       - catgirl_data:/data
       # 热挂载人格文件：改完只需 docker compose restart，不用重建镜像
       - ./persona.md:/app/persona.md:ro
+      - ./assets/emoji:/app/assets/emoji:ro
     healthcheck:
       test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://127.0.0.1:8000/healthz', timeout=2)"]
       interval: 30s
@@ -98,6 +99,7 @@ services:
       - catgirl_data:/data
       # 同上，QQ 服务也要能读到最新的人格文件
       - ./persona.md:/app/persona.md:ro
+      - ./assets/emoji:/app/assets/emoji:ro
     extra_hosts:
       # 协议端跑在宿主机时（NapCat Shell + systemd，推荐），
       # 用 host-gateway 把宿主机的 3001 端口映射进容器
@@ -151,6 +153,7 @@ services:
     volumes:
       - catgirl_data:/data
       - ./persona.md:/app/persona.md:ro
+      - ./assets/emoji:/app/assets/emoji:ro
 
   # 手机桥接（真机方案）：手机上跑官方 QQ 客户端 + AutoX.js 脚本（deploy/phone_autojs.js），
   # 由手机主动连过来，本服务当 WebSocket 服务端。设备指纹、客户端、网络全是「真的」，
@@ -205,6 +208,7 @@ services:
     volumes:
       - catgirl_data:/data
       - ./persona.md:/app/persona.md:ro
+      - ./assets/emoji:/app/assets/emoji:ro
 
   # QQ 协议端（Docker 版，备用方案）。
   # 默认不启用：推荐在宿主机用 NapCat Shell + systemd 跑协议端（见 06_napcat_native.sh），
