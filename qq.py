@@ -49,6 +49,10 @@ STATE_TAG = re.compile(r"<state\s[^>]*/?>", re.S)
 # 方括号是系统占位符，圆括号是动作/心理描写，都不该出现在 QQ 回复里。出口统一清掉。
 BRACKETS = re.compile(r"［[^［］]*］|\[[^\[\]]*\]|（[^（）]*）|\([^()]*\)")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
+# 一句话结束的标志。换行也算——模型爱「一句一行」地写剧本，换行处就是该断的地方。
+FIRST_SENTENCE_END = re.compile(r"[。！？!?~～\n]")
+# 应答词：本身就是一个完整回复，不用再往后取一句
+ANSWER_WORD = re.compile(r"^(?:在|嗯|哦|噢|啊|好|行|是|对|没|有|哈|嘿|呃|唉)")
 
 # ------------------------------------------------------------ 语音触发词
 # 语音不是每句话都发，只在「有必要」的时候发。三种情况：
@@ -106,6 +110,29 @@ def tidy_punctuation(text):
     return text.strip()
 
 
+def first_sentence(text):
+    """只留第一句，后面一律砍掉。
+
+    模型有个改不掉的毛病：先答一句，再随手补一句自编的现场
+    （"在呢～" + "刚数到一百七十九。"）。提示词已经写死禁令也压不住，
+    因为它会照着上下文里自己的旧台词模仿。出口这里做最后一道兜底：
+    第一句就是完整意思，后面全是多余。
+    """
+    match = FIRST_SENTENCE_END.search(text)
+    if not match:
+        return text
+    head = text[: match.end()].strip()
+    body = re.sub(r"[^\w\u4e00-\u9fff]", "", head)
+    if not body:
+        return text
+    # 「在呢～」这种应答词本身就够一个回复了；只有「不。」这种半句话才往后取一句，
+    # 免得把真正的意思砍掉
+    if len(body) >= 3 or ANSWER_WORD.match(body):
+        return head
+    nxt = FIRST_SENTENCE_END.search(text, match.end())
+    return text[: nxt.end()].strip() if nxt else text.strip()
+
+
 def forQQ(text):
     """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号、清符号。
 
@@ -128,7 +155,7 @@ def forQQ(text):
     text = "\n".join(lines)
 
     text = re.sub(r"[ \t　]{2,}", " ", text)
-    return text.strip()
+    return first_sentence(text.strip())
 
 
 def split_text(text, limit=400):
