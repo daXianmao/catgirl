@@ -45,9 +45,9 @@ function Test-LauncherAlive {
 }
 
 function Start-Launcher {
-    $bat = Join-Path $NapDir "napcat_start.bat"
+    $bat = Join-Path $BinDir "napcat_start.bat"
     if (-not (Test-Path $bat)) {
-        Write-Log "找不到 $bat，检查 NapCat 装在哪"
+        Write-Log "找不到 $bat，检查 bat 是不是都放在 C:\Lingdang"
         return
     }
     $proc = Start-Process -FilePath $bat -WindowStyle Minimized -PassThru
