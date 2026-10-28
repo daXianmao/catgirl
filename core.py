@@ -17,6 +17,18 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 STATE_TAG = re.compile(r"<state\s*([^>]*?)\s*/?>\s*$", re.S)
 ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
+# 模型偶尔还是会滑回小说体（括号旁白 + 引号台词 + 分行）。
+# 写进历史之前先把这些剥干净：历史是它的模仿源，留一条脏的就会被学一条。
+STAGE_TAG = re.compile(r"［[^［］]*］|\[[^\[\]]*\]|（[^（）]*）|\([^()]*\)")
+QUOTE_MARKS = str.maketrans("", "", "“”‘’「」『』")
+
+
+def strip_stage(text):
+    """剥掉舞台指示和台词引号，并把多行压成一行。"""
+    cleaned = STAGE_TAG.sub("", text or "").translate(QUOTE_MARKS)
+    lines = [line.strip() for line in cleaned.splitlines() if line.strip()]
+    return "".join(lines).strip()
+
 # ------------------------------------------------------------------ 心情
 # 心情不用一个词表示，用两个数：
 #   valence（愉悦）  -1 难受 ~ +1 舒服
@@ -247,7 +259,7 @@ class CatgirlCore:
         lines.append(
             "## 提醒\n"
             "你是在 QQ 上打字，只能发出文字。不写动作、神态、光线、道具、环境，"
-            "不用括号，不用引号包自己的话，不分段，一条回复最多三句、正文 40 字以内。\n"
+            "不用括号，不用引号包自己的话，不分段，一条回复最多两句、正文 35 字以内。\n"
             "记忆可能过时或不完整，自然地用，不确定就问。\n"
             '回复结尾记得带 <state mood="..." affinity="..." v="..." a="..."/>：'
             "mood 还是那两个字的词（给日志看），"
@@ -446,7 +458,10 @@ class CatgirlCore:
             yield ("delta", rest)
 
         # 标签只用于更新状态，不能进对话历史，否则下次会当作台词读到
-        cleanReply = STATE_TAG.sub("", rawReply).strip()
+        cleanReply = strip_stage(STATE_TAG.sub("", rawReply))
+        if not cleanReply:
+            # 全是旁白没有台词时不能存空行，退回原文
+            cleanReply = STATE_TAG.sub("", rawReply).strip()
         replyMood, replyV, replyA = self.apply_state(rawReply)
         self.store.add_turn(self.session, "user", hiddenText or userText)
         self.store.add_turn(self.session, "assistant", cleanReply)

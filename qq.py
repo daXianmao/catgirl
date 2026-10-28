@@ -50,6 +50,8 @@ STATE_TAG = re.compile(r"<state\s[^>]*/?>", re.S)
 BRACKETS = re.compile(r"［[^［］]*］|\[[^\[\]]*\]|（[^（）]*）|\([^()]*\)")
 # 兜底用：整段只有动作描写时，把括号拆掉但保留里面的字，别让回复变成空字符串
 BRACKETS_INNER = re.compile(r"[［\[（(]([^［］\[\]（）()]*)[］\]）)]")
+# 台词引号：她会把每句话都拿引号圈起来，发到 QQ 像在念剧本
+QUOTE_MARKS = str.maketrans("", "", "“”‘’「」『』")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
 
 # ------------------------------------------------------------ 表情包
@@ -162,12 +164,15 @@ def forQQ(text):
     空串会被上层当成"没有可念的内容"直接吞掉，主人那边就什么也收不到。这时退一步，
     把括号拆掉但保留里面的字，至少把话说明白。
     """
-    raw = STATE_TAG.sub("", text or "")
+    raw = STATE_TAG.sub("", text or "").translate(QUOTE_MARKS)
     cleaned = _tidy_lines(tidy_punctuation(MD_MARKS.sub("", BRACKETS.sub("", raw))))
-    if cleaned:
-        return cleaned
-    soft = _tidy_lines(tidy_punctuation(MD_MARKS.sub("", BRACKETS_INNER.sub(r"\1", raw))))
-    return soft
+    if not cleaned:
+        cleaned = _tidy_lines(tidy_punctuation(MD_MARKS.sub("", BRACKETS_INNER.sub(r"\1", raw))))
+    # 一条回复只发一条消息：模型爱把四五句台词分行写，QQ 里会被拆成好几条，
+    # 看着像刷屏。中文句末标点自带停顿，连接起来不影响阅读。
+    merged = re.sub(r"[ \t　]*\n+[ \t　]*", "", cleaned).strip()
+    # 合并之后行首的「——」「，」会紧贴上一句的句号，出现「。，」这种鬼东西
+    return re.sub(r"([。！？!?])[，、；：]", r"\1", merged).strip()
 
 
 def split_text(text, limit=400):
