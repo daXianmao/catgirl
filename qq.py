@@ -48,6 +48,8 @@ STATE_TAG = re.compile(r"<state\s[^>]*/?>", re.S)
 # 模型偶尔会把「［图片］」「（歪头）」这类括号包着的内容当台词复述出来：
 # 方括号是系统占位符，圆括号是动作/心理描写，都不该出现在 QQ 回复里。出口统一清掉。
 BRACKETS = re.compile(r"［[^［］]*］|\[[^\[\]]*\]|（[^（）]*）|\([^()]*\)")
+# 兜底用：整段只有动作描写时，把括号拆掉但保留里面的字，别让回复变成空字符串
+BRACKETS_INNER = re.compile(r"[［\[（(]([^［］\[\]（）()]*)[］\]）)]")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
 
 # ------------------------------------------------------------ 表情包
@@ -92,6 +94,10 @@ HAPPY_MOODS = ("开心", "得意")
 VOICE_HAPPY_LIMIT = 120
 VOICE_REQUEST_LIMIT = 300
 VOICE_MUTE_SECONDS = 1800
+# base64 兜底只处理不大的语音；再大就只走文件路径，免得一条消息几百 MB
+VOICE_B64_LIMIT = 6 * 1024 * 1024
+# 协议端自己所在主机的别名：只有这些说明它和我们在同一台机器上，file:// 才读得到
+LOCAL_PROTOCOL_HOSTS = ("127.0.0.1", "localhost", "::1", "napcat", "catgirl-napcat")
 
 
 
@@ -132,18 +138,8 @@ def tidy_punctuation(text):
     return text.strip()
 
 
-def forQQ(text):
-    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号、清符号。
-
-    模型爱写「（动作描写）\\n台词」这种剧本格式。括号删掉后每行都会剩一个空壳，
-    还带着行首的「，」「——」这类孤儿标点，看着像句子被从中间截断。这里按行收一遍，
-    只留真正的台词。
-    """
-    text = STATE_TAG.sub("", text or "")
-    text = BRACKETS.sub("", text)
-    text = MD_MARKS.sub("", text)
-    text = tidy_punctuation(text)
-
+def _tidy_lines(text):
+    """按行收一遍：去掉只有标点的空壳行，合并多余空格。"""
     lines = []
     for line in text.split("\n"):
         line = line.strip(" \t　")
@@ -152,9 +148,26 @@ def forQQ(text):
         if line:
             lines.append(line)
     text = "\n".join(lines)
+    return re.sub(r"[ \t　]{2,}", " ", text).strip()
 
-    text = re.sub(r"[ \t　]{2,}", " ", text)
-    return text.strip()
+
+def forQQ(text):
+    """把模型回复整理成 QQ 里看着正常的样子：去状态标签、去括号内容、去 Markdown 记号、清符号。
+
+    模型爱写「（动作描写）\\n台词」这种剧本格式。括号删掉后每行都会剩一个空壳，
+    还带着行首的「，」「——」这类孤儿标点，看着像句子被从中间截断。这里按行收一遍，
+    只留真正的台词。
+
+    万一整条回复只有动作描写（例如「（金铃震动）……契约回响。」被清完），不能返回空串——
+    空串会被上层当成"没有可念的内容"直接吞掉，主人那边就什么也收不到。这时退一步，
+    把括号拆掉但保留里面的字，至少把话说明白。
+    """
+    raw = STATE_TAG.sub("", text or "")
+    cleaned = _tidy_lines(tidy_punctuation(MD_MARKS.sub("", BRACKETS.sub("", raw))))
+    if cleaned:
+        return cleaned
+    soft = _tidy_lines(tidy_punctuation(MD_MARKS.sub("", BRACKETS_INNER.sub(r"\1", raw))))
+    return soft
 
 
 def split_text(text, limit=400):
@@ -574,9 +587,30 @@ class QQBot:
             return len(reply) <= VOICE_HAPPY_LIMIT, "特别开心"
         return False, ""
 
+    def preferBase64(self):
+        """协议端和机器人不在同一台机器时，容器里的 wav 路径它读不到（会报
+        「Failed to open input: 没有那个文件或目录」），所以优先发 base64。
+
+        CATGIRL_QQ_VOICE_URI 可以强制：base64 / file / auto（默认按 WS 地址判断）。
+        """
+        mode = str(self.cfg.get("qqVoiceUri") or "auto").strip().lower()
+        if mode in ("base64", "b64"):
+            return True
+        if mode in ("file", "path", "file://"):
+            return False
+        host = re.sub(r"^[a-zA-Z]+://", "", self.wsUrl or "").split("/")[0]
+        host = host.split("@")[-1]
+        if host.startswith("["):
+            host = host[1:].split("]")[0]
+        else:
+            host = host.split(":")[0]
+        return host.lower() not in LOCAL_PROTOCOL_HOSTS
+
     async def send_voice(self, kind, chatId, text, userId):
-        """把回复合成语音发出去。优先给协议端本地路径（同一卷），
-        失败再退 base64（协议端多半支持 base64://，代价是消息变大）。
+        """把回复合成语音发出去。
+
+        优先给协议端本地路径（同一卷、最快）；路径读不到就改 base64（协议端能自带数据）。
+        两者顺序由 preferBase64() 决定，默认按协议端位置自动选。
 
         返回是否真的发出去了：成功了上层就不再发文字，免得同一句话听到两遍。
         """
@@ -602,25 +636,37 @@ class QQBot:
         action = "send_group_msg" if kind == "group" else "send_private_msg"
         key = "group_id" if kind == "group" else "user_id"
 
-        # 协议端能读到的绝对路径（compose 里 catgirl 与 napcat 挂同一个 /data 卷）
-        fileUri = "file://" + os.path.abspath(result["path"]).replace("\\", "/")
-        sent = await self.call(action, {key: chatId, "message": [{"type": "record", "data": {"file": fileUri}}]})
-        if sent and sent.get("status") not in ("failed", "error"):
-            return True
+        path = result["path"]
+        fileUri = "file://" + os.path.abspath(path).replace("\\", "/")
 
-        # 本地路径这招不行就改 base64，彻底摆脱路径/挂载/权限问题
+        # base64 数据：协议端读不到我们的文件系统时（NapCat 跑在另一台机器上）用它
+        b64Uri = None
         try:
-            with open(result["path"], "rb") as handle:
-                raw = handle.read()
+            size = os.path.getsize(path)
+            if size <= VOICE_B64_LIMIT:
+                with open(path, "rb") as handle:
+                    b64Uri = "base64://" + base64.b64encode(handle.read()).decode("ascii")
+            else:
+                log(f"语音文件 {size // 1024}KB 偏大，不做 base64 兜底")
         except OSError as exc:
             log(f"读语音文件失败：{exc}")
-            return False
-        b64Uri = "base64://" + base64.b64encode(raw).decode("ascii")
-        sent = await self.call(action, {key: chatId, "message": [{"type": "record", "data": {"file": b64Uri}}]})
-        if not sent or sent.get("status") in ("failed", "error"):
-            log("语音发送失败（协议端可能不支持该格式），改发文字")
-            return False
-        return True
+
+        if self.preferBase64():
+            attempts = [("base64", b64Uri), ("文件路径", fileUri)]
+        else:
+            attempts = [("文件路径", fileUri), ("base64", b64Uri)]
+
+        for label, uri in attempts:
+            if not uri:
+                continue
+            sent = await self.call(action, {key: chatId,
+                                            "message": [{"type": "record", "data": {"file": uri}}]})
+            if sent and sent.get("status") not in ("failed", "error"):
+                return True
+            log(f"语音发送失败（{label}），换另一种方式")
+
+        log("语音发送失败（协议端可能不支持该格式），改发文字")
+        return False
 
     # ------------------------------------------------------------ 主动搭话
     @staticmethod
@@ -854,6 +900,11 @@ class QQBot:
         async with session.lock:
             reply, meta = await self.reply_text(session, userText)
             reply, emojiName = self.take_emoji(reply, session)
+            if not reply.strip():
+                # 出口清洗把整条回复清空了（模型只给了动作描写或只发了表情），
+                # 空串会被 send() 当没有内容静默丢掉，主人这边就是「没反应」。
+                log("模型没给出可发的台词，用兜底一句顶上")
+                reply = "……嗯。"
             wantVoice, why = self.voice_decision(
                 kind, rawText, reply, meta, session, bool(records)
             )

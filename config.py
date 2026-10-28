@@ -128,6 +128,10 @@ DEFAULTS = {
     # 语音发送策略：smart = 只在必要的时候发（对方点名要 / 语音对语音 / 特别开心）；
     # always = 旧行为，每条回复后面都跟一条语音
     "qqVoiceMode": "smart",
+    # 语音文件的投递方式：auto = 按协议端位置自动选（协议端不在本机就走 base64）；
+    # base64 = 强制把音频塞进消息里（协议端在别的机器时必须用它）；
+    # file = 强制给本地路径（协议端和机器人共用一个卷时才有效）
+    "qqVoiceUri": "auto",
     "qqNickname": True,
     "ownerQq": "",
     # 主动搭话：没人跟她说话的时候，她自己掷骰子决定要不要先开口。
@@ -296,6 +300,7 @@ def load_config(overrides=None):
         "CATGIRL_QQ_RATE": "qqRate",
         "CATGIRL_QQ_MAX_CHARS": "qqMaxChars",
         "CATGIRL_QQ_VOICE_MODE": "qqVoiceMode",
+        "CATGIRL_QQ_VOICE_URI": "qqVoiceUri",
         "CATGIRL_QQ_SPEAK_UP_CHANCE": "qqSpeakUpChance",
         "CATGIRL_QQ_SPEAK_UP_EVERY": "qqSpeakUpEvery",
         "CATGIRL_QQ_SPEAK_UP_IDLE": "qqSpeakUpIdle",
