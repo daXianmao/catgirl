@@ -56,27 +56,31 @@ QUOTE_MARKS = str.maketrans("", "", "“”‘’「」『』")
 MD_MARKS = re.compile(r"(\*\*|__|`|^#+\s*)", re.M)
 
 # ------------------------------------------------------------ 表情包
-# 模型在回复里写 <emoji name="baka"/> 就附带发一张图。名字必须在表里，
+# 模型在回复里写 <emoji name="please"/> 就附带发一张图。名字必须在表里，
 # 编一个不存在的名字不会发任何东西，避免静默出错。
 EMOJI_TAG = re.compile(r"<emoji\s+name=[\"']?([a-z_]+)[\"']?\s*/?>", re.I)
 EMOJI_DIR = os.path.join(BASE_DIR, "assets", "emoji")
 EMOJI_FILES = {
-    "kuku": "01_kuku.jpg",           # 库库库……（得意偷笑）
-    "baka": "02_baka.jpg",           # 笨蛋！变态！
-    "godplay": "03_godplay.jpg",     # 这是神之操作
-    "curse_you": "04_curse_you.jpg", # 诅咒你喔！
-    "disgust": "05_disgust.jpg",     # 恶心。
-    "eat": "06_eat.jpg",             # 趁热吃吧。
-    "surprise": "07_surprise.jpg",   # 诶！？！？
-    "asexpected": "08_asexpected.jpg",  # 不愧是我。
-    "destiny": "09_destiny.jpg",     # 命运的指引。
-    "shoot": "10_shoot.jpg",         # 正在取材……
-    "explode": "11_explode.jpg",     # 现充都爆炸吧！
-    "accompany": "12_accompany.jpg",  # 那个…能陪我吗
-    "elegant": "13_elegant.jpg",     # 优雅。
-    "stayaway": "14_stayaway.jpg",   # 别过来。
-    "ha": "15_ha.jpg",               # 哈——！
-    "curse": "16_curse.jpg",         # 这是诅咒哦。
+    "daze": "01_daze.png",           # 发呆放空
+    "smile": "02_smile.png",         # 安静微笑
+    "please": "03_please.png",       # 求求你啦
+    "sweat": "04_sweat.png",         # 无语冒汗
+    "sparkle": "05_sparkle.png",     # 闪亮登场
+    "what": "06_what.png",           # 怎么回事
+    "hmph": "07_hmph.png",           # 不服气
+    "breakdown": "08_breakdown.png",  # 抓狂崩溃
+    "love": "09_love.png",           # 喜欢（抱心）
+    "answer": "10_answer.png",       # 回答我
+    "cry": "11_cry.png",             # 大哭
+    "shout": "12_shout.png",         # 大喊
+    "eat": "13_eat.png",             # 好吃、一起吃
+    "elegant": "14_elegant.png",     # 端庄乖巧
+    "introduce": "15_introduce.png",  # 请支持洛天依
+    "tired": "16_tired.png",         # 累了、撑不住
+    "tease": "17_tease.png",         # 调皮吐舌
+    "yay": "18_yay.png",             # 好耶
+    "laugh": "19_laugh.png",         # 大笑
+    "bye": "20_bye.png",             # 拜拜
 }
 EMOJI_COOLDOWN = 40  # 同一会话两张表情之间至少隔这么久，别刷屏
 
@@ -320,10 +324,12 @@ class QQBot:
         self.rate = float(cfg.get("qqRate") or 1.5)
         self.maxChars = int(cfg.get("qqMaxChars") or 400)
         # 曲库：剪辑结果缓存在数据卷里，同一首第二次不用再算
+        # 片段长度跟 core 那边保持同一套区间（10~30 秒随机）
         self.songs = SongLibrary(
             cfg.get("songDir") or os.path.join(cfg["dataDir"], "songs"),
             cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
-            clipSeconds=cfg.get("songClipSeconds") or 30,
+            clipSeconds=cfg.get("songClipMax") or cfg.get("songClipSeconds") or 30,
+            clipMin=cfg.get("songClipMin") or 10,
         )
 
         # 主动搭话：她自己掷骰子决定要不要先开口。掷骰子是本地随机，不花 token；
