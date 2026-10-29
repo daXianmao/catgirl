@@ -8,12 +8,16 @@ import os
 import re
 import threading
 import time
-from datetime import datetime
+from datetime import datetime, timedelta, timezone
 
 from brain import Brain, BrainError
 from memory import MemoryStore
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+# 云端容器默认跑 UTC，问她几点会答错 8 小时。这里直接写死东八区，
+# 不依赖镜像里的 tzdata，换到任何机器上都是北京时间。
+LOCAL_TZ = timezone(timedelta(hours=8))
+
 STATE_TAG = re.compile(r"<state\s*([^>]*?)\s*/?>\s*$", re.S)
 ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
@@ -76,8 +80,8 @@ LOCAL_PROVIDERS = {"lmstudio", "ollama"}
 
 def human_time(ts):
     """把时间戳说成人话。超过一个月的直接报日期，跨年写成「去年 09-17」。"""
-    now = datetime.now()
-    when = datetime.fromtimestamp(ts)
+    now = datetime.now(LOCAL_TZ)
+    when = datetime.fromtimestamp(ts, LOCAL_TZ)
     delta = max(0, time.time() - ts)
     if delta < 90:
         return "刚刚"
@@ -209,7 +213,7 @@ class CatgirlCore:
         moodV, moodA, moodAge = self.current_mood()
         firstSeen = self.store.get_kv_float("firstSeen", time.time())
         knownDays = int((time.time() - firstSeen) // 86400) + 1
-        weekday = "一二三四五六日"[datetime.now().weekday()]
+        weekday = "一二三四五六日"[datetime.now(LOCAL_TZ).weekday()]
 
         # 心情数值 + 它是多久之前定下的。刚变的心情说「刚才」，放久了的说「慢慢回稳了」，
         # 这样她才不会把三小时前的一点点不高兴当成现在还在生气
@@ -231,7 +235,7 @@ class CatgirlCore:
             self.persona.strip(),
             "",
             "## 现在",
-            f"- 时间：{datetime.now():%Y-%m-%d %H:%M}（周{weekday}）",
+            f"- 时间：{datetime.now(LOCAL_TZ):%Y-%m-%d %H:%M}（周{weekday}）",
             f"- {self.gapText}",
             f"- 你们认识第 {knownDays} 天 ｜ 好感度 {int(affinity)}/100（{relation}）｜ 你此刻的心情：{moodText}",
             "",

@@ -14,7 +14,17 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
     PYTHONUNBUFFERED=1 \
     CATGIRL_HOST=0.0.0.0 \
     CATGIRL_PORT=8000 \
-    CATGIRL_DATA=/data
+    CATGIRL_DATA=/data \
+    TZ=Asia/Shanghai
+
+# 基础镜像默认 UTC，比北京时间慢 8 小时：问她几点会答错，日志时间也错位。
+# 装上 tzdata 并指向上海，让 date / time.strftime 这些走系统时区的地方都对。
+ENV DEBIAN_FRONTEND=noninteractive
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends tzdata \
+    && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
+    && echo $TZ > /etc/timezone \
+    && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
