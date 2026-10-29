@@ -26,7 +26,7 @@ async def handler(ws):
             action, params, echo = data.get("action"), data.get("params"), data.get("echo")
             if action == "get_login_info":
                 reply = {"status": "ok", "retcode": 0, "echo": echo,
-                         "data": {"user_id": 10001, "nickname": "铃洛"}}
+                         "data": {"user_id": 10001, "nickname": "洛天依"}}
                 await ws.send(json.dumps(reply))
                 continue
 

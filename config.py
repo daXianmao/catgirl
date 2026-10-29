@@ -81,10 +81,10 @@ PROVIDERS = {
 }
 
 DEFAULTS = {
-    "name": "铃洛",
+    "name": "洛天依",
     "provider": "dashscope",
     "temperature": 0.85,
-    # 铃洛一条回复只要 40 字以内，400 留了足够余量（含 state 标签）。
+    # 一条回复只要 60 字以内，400 留了足够余量（含 state 标签）。
     # 之前 800 太宽松，模型会顺着写成长段小说体。
     "maxTokens": 400,
     "topK": 8,

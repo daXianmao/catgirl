@@ -49,7 +49,7 @@ MOOD_VECTORS = {
     "平静": (0.05, 0.30), "犯困": (0.00, 0.10), "委屈": (-0.45, 0.35),
     "嫌弃": (-0.25, 0.45), "烦躁": (-0.40, 0.65),
     "难过": (-0.70, 0.25), "生气": (-0.65, 0.80), "不服": (-0.30, 0.70),
-    # 铃洛那套词表之外，天依会用到的三个
+    # 原词表之外，天依会用到的三个
     "心疼": (-0.35, 0.45), "兴奋": (0.75, 0.85), "迷糊": (0.10, 0.15),
 }
 # 什么都没发生时的底色：不悲不喜、微微醒着
@@ -131,7 +131,7 @@ class TailBuffer:
 class CatgirlCore:
     def __init__(self, cfg, dbPath=None, personaPath=None, session=None):
         self.cfg = cfg
-        self.name = cfg.get("name", "铃洛")
+        self.name = cfg.get("name", "洛天依")
         self.session = session or f"s{int(time.time() * 1000)}"
         self.personaPath = personaPath or os.path.join(BASE_DIR, "persona.md")
         self.persona = self._load_persona()

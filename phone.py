@@ -25,7 +25,7 @@ QQ 是官方客户端、设备是真实手机、网络是家宽，腾讯侧看�
        "chatName":"群名","sender":"昵称","senderId":"123","text":"正文"}
       {"type":"ping"}
     服务器 → 手机
-      {"type":"welcome","name":"铃洛"}
+      {"type":"welcome","name":"洛天依"}
       {"type":"reply","chat":"private:123","chunks":["第一段","第二段"],"id":"...","ts":1.0}
       {"type":"error","msg":"..."}
 
