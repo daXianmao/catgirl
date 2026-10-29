@@ -147,10 +147,13 @@ class CatgirlCore:
         )
 
         # 曲库：只读目录 + 剪好的片段缓存，交给数据卷一起持久化
+        # 片段长度每次在 [clipMin, clipMax] 里随机，最长不超过 clipSeconds
+        clipMax = cfg.get("songClipMax") or cfg.get("songClipSeconds") or 30
         self.songs = SongLibrary(
             cfg.get("songDir") or os.path.join(cfg["dataDir"], "songs"),
             cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
-            clipSeconds=cfg.get("songClipSeconds") or 30,
+            clipSeconds=clipMax,
+            clipMin=cfg.get("songClipMin") or 10,
         )
         self.dbPath = dbPath or os.path.join(cfg["dataDir"], "memory.db")
         self.store = MemoryStore(self.dbPath)
@@ -282,7 +285,7 @@ class CatgirlCore:
             titles = []
         if titles:
             lines.append("## 你会唱的歌（曲库）")
-            lines.append("- " + "、".join(titles[:60]))
+            lines.append("- " + "、".join(titles[:140]))
             lines.append(
                 "主人想听歌时，从曲库里挑一首直接唱，别再问他听哪首。\n"
                 "回复最后单独写 <sing title=\"歌名\"/>，系统会把这一段录音发出去。\n"

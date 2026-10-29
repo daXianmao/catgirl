@@ -1,4 +1,7 @@
-"""曲库：挑一首歌，剪出 30 秒左右的一整段发出去。
+"""曲库：挑一首歌，剪出 10~30 秒左右的一整段发出去。
+
+每次剪多长是随机的（默认 10~30 秒里取），别让主人每次都听到一样长的片段；
+起点和终点仍然都落在换气口，所以不会切开句子。
 
 下刀位置决定会不会「唱半句」。做法是两步：
   1. ffmpeg silencedetect 找真正的静音；
@@ -18,6 +21,7 @@ import hashlib
 import json
 import math
 import os
+import random
 import re
 import subprocess
 
@@ -51,12 +55,17 @@ def _norm(text):
 
 
 class SongLibrary:
-    def __init__(self, dirs, cacheDir=None, clipSeconds=30):
+    def __init__(self, dirs, cacheDir=None, clipSeconds=30, clipMin=None, clipMax=None):
         if isinstance(dirs, str):
             dirs = [dirs]
         self.dirs = [d for d in dirs if d]
         self.cacheDir = cacheDir or os.path.join(self.dirs[0] if self.dirs else "/tmp", ".cache")
-        self.clipSeconds = float(clipSeconds or 30)
+        # clipSeconds 是老配置里的「长度」，现在当上限用；min/max 才是真正的随机区间
+        self.clipMax = float(clipMax or clipSeconds or 30)
+        self.clipMin = float(clipMin or min(10.0, self.clipMax))
+        if self.clipMin > self.clipMax:
+            self.clipMin, self.clipMax = self.clipMax, self.clipMin
+        self.clipSeconds = self.clipMax  # 兼容旧调用
         self._entries = None
 
     # -------------------------------------------------------------- 目录
@@ -136,9 +145,15 @@ class SongLibrary:
         return items[0] if items else None
 
     # -------------------------------------------------------------- 剪辑
+    def _targetLength(self):
+        """这次剪多长：在 [clipMin, clipMax] 里随机取，两端都落换气口。"""
+        if self.clipMax - self.clipMin < 0.5:
+            return round(self.clipMax, 1)
+        return round(random.uniform(self.clipMin, self.clipMax), 1)
+
     def clip(self, song, target=None):
         """剪出完整句的一段，返回 mp3 路径（同参数走缓存）。"""
-        target = float(target or self.clipSeconds)
+        target = float(target or self._targetLength())
         src = song["path"] if isinstance(song, dict) else str(song)
         if not os.path.exists(src):
             raise SongError(f"音频不存在：{src}")
@@ -159,7 +174,9 @@ class SongLibrary:
 
     def _run(self, args):
         try:
-            return subprocess.run(args, capture_output=True, text=True, timeout=180)
+            # errors="replace"：有些歌的 ID3 标签是 GBK，ffmpeg 会原样吐到 stderr，
+            # 严格 UTF-8 解码会直接抛 UnicodeDecodeError，整首歌就唱不出来了
+            return subprocess.run(args, capture_output=True, text=True, errors="replace", timeout=180)
         except FileNotFoundError as exc:
             raise SongError("镜像里没有 ffmpeg，唱歌功能不可用") from exc
         except subprocess.TimeoutExpired as exc:
@@ -247,31 +264,44 @@ class SongLibrary:
         return [p for p in merged if 0.5 < p < duration - 0.5]
 
     def _window(self, src, duration, target):
-        """挑一段窗口：起点和终点都落在换气口，长度贴近 target。"""
-        if duration <= target + 1:
-            return 0.0, duration  # 本来就短，整首放
+        """挑一段窗口：起点和终点都落在换气口，长度落在 [clipMin, clipMax] 里。"""
+        lo = self.clipMin
+        hi = self.clipMax
+        if duration <= lo + 1:  # 本来就短，整首放
+            return 0.0, duration
 
         cuts = self._cut_points(src, duration)
         if not cuts:
             return 0.0, min(target, duration)
 
-        # 起点避开前奏：优先 20 秒附近，歌短就按比例往前挪
-        preferred = min(20.0, duration * 0.2)
-        start = min(cuts, key=lambda t: abs(t - preferred))
+        # 起点避开前奏：优先 20 秒附近，歌短就按比例往前挪，但要留够 lo 秒。
+        # 换气口可能很密，只拿离理想起点最近的几个当候选，避免整首乱翻。
+        room = max(0.0, duration - lo - 1)
+        preferred = min(20.0, duration * 0.2, room)
+        starts = [t for t in sorted(cuts, key=lambda t: abs(t - preferred))[:6] if t <= room]
+        if not starts:
+            starts = [0.0]
 
-        # 终点取离 start+target 最近的换气口，长度允许 27~38 秒
-        tail = [t for t in cuts if t > start]
-        if tail:
-            best = min(tail, key=lambda t: abs((t - start) - target))
-            length = best - start
-            if target - 3 <= length <= target + 8:
-                return start, length
-            if length > target + 8:  # 换气口太稀，退一步硬切但也落在谷底
-                return start, target
+        # 对每个起点扫后面的换气口，长度落在区间里最好、越贴近 target 越优先
+        best = None
+        for start in starts:
+            for end in cuts:
+                length = end - start
+                if length < lo * 0.5:
+                    continue
+                if length > hi + 4:
+                    break
+                if lo <= length <= hi:
+                    score = abs(length - target)
+                else:  # 区间外重罚，宁可换短一点的那句也不给半句
+                    score = abs(length - target) + 20 + max(0.0, lo - length) + max(0.0, length - hi)
+                if best is None or score < best[0]:
+                    best = (score, start, length)
+        if best is not None:
+            return best[1], best[2]
 
-        # 起点太靠后（歌尾没有换气口了），退回从头找
-        if start > 10 and duration - start < target + 3:
-            return 0.0, min(target, duration)
+        # 换气口太稀（连着唱了一分多钟）：硬切，但起点还是落在换气口
+        start = starts[0]
         return start, min(target, duration - start)
 
     def _cut(self, src, out, start, length):

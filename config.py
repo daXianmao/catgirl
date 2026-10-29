@@ -100,8 +100,12 @@ DEFAULTS = {
     # 想克隆音色就切 siliconflow / openai，靠配置切换不用改代码
     # 唱歌曲库：跟数据卷放一起，主人往 /data/songs 里丢文件就能唱
     "songDir": "/data/songs",
-    # 每次发出去的唱段长度（秒），剪辑会在整句之间的静音下刀，不会唱半句
+    # 每次发出去的唱段长度（秒），剪辑会在整句之间的静音下刀，不会唱半句。
+    # 实际长度在 [songClipMin, songClipMax] 里随机取，别每次都一样长。
+    # songClipSeconds 只留作上限的兼容别名（老配置只填了它就当上限用）。
     "songClipSeconds": 30,
+    "songClipMin": 10,
+    "songClipMax": 30,
     "ttsProvider": "edge",
     "ttsVoice": "",
     "ttsModel": "",
@@ -284,6 +288,8 @@ def load_config(overrides=None):
         "CATGIRL_TIMEOUT": "timeout",
         "CATGIRL_SONG_DIR": "songDir",
         "CATGIRL_SONG_CLIP": "songClipSeconds",
+        "CATGIRL_SONG_CLIP_MIN": "songClipMin",
+        "CATGIRL_SONG_CLIP_MAX": "songClipMax",
         "CATGIRL_TTS_PROVIDER": "ttsProvider",
         "CATGIRL_TTS_VOICE": "ttsVoice",
         "CATGIRL_TTS_MODEL": "ttsModel",
