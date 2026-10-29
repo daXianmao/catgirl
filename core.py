@@ -12,6 +12,7 @@ from datetime import datetime, timedelta, timezone
 
 from brain import Brain, BrainError
 from memory import MemoryStore
+from song import SongLibrary
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 # 云端容器默认跑 UTC，问她几点会答错 8 小时。这里直接写死东八区，
@@ -19,6 +20,8 @@ BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 LOCAL_TZ = timezone(timedelta(hours=8))
 
 STATE_TAG = re.compile(r"<state\s*([^>]*?)\s*/?>\s*$", re.S)
+# 想唱歌时模型写 <sing title="歌名"/>，服务端据此发一段录音
+SING_TAG = re.compile(r"<sing\s+title\s*=\s*\"([^\"]*)\"\s*/?>", re.I)
 ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
 # 模型偶尔还是会滑回小说体（括号旁白 + 引号台词 + 分行）。
@@ -143,6 +146,12 @@ class CatgirlCore:
             _PROCESS_LOCK if cfg.get("provider") in LOCAL_PROVIDERS else threading.RLock()
         )
 
+        # 曲库：只读目录 + 剪好的片段缓存，交给数据卷一起持久化
+        self.songs = SongLibrary(
+            cfg.get("songDir") or os.path.join(cfg["dataDir"], "songs"),
+            cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
+            clipSeconds=cfg.get("songClipSeconds") or 30,
+        )
         self.dbPath = dbPath or os.path.join(cfg["dataDir"], "memory.db")
         self.store = MemoryStore(self.dbPath)
 
@@ -264,6 +273,23 @@ class CatgirlCore:
             lines.append("## 更早的片段")
             for item in summaries:
                 lines.append(f"- {item['content']}")
+
+        lines.append("")
+        titles = []
+        try:
+            titles = self.songs.titles()
+        except Exception:
+            titles = []
+        if titles:
+            lines.append("## 你会唱的歌（曲库）")
+            lines.append("- " + "、".join(titles[:60]))
+            lines.append(
+                "主人想听你唱歌时，从这里挑一首，回复末尾单独写 <sing title=\"歌名\"/>，"
+                "系统会把这段录音发出去，你不用自己形容唱了什么。\n"
+                "他点了曲库里没有的歌，就不要写这个标记，照实说还没学会，等学会了再唱。"
+            )
+        else:
+            lines.append("## 你会唱的歌\n- 曲库现在是空的，别答应唱歌，说还没学会。")
 
         lines.append("")
         lines.append(
@@ -468,8 +494,14 @@ class CatgirlCore:
         if rest:
             yield ("delta", rest)
 
+        # 唱歌请求：标签只用来决定发哪段录音，不能当台词，也不能进历史
+        singTitle = None
+        match = SING_TAG.search(rawReply)
+        if match:
+            singTitle = match.group(1).strip()
+
         # 标签只用于更新状态，不能进对话历史，否则下次会当作台词读到
-        cleanReply = strip_stage(STATE_TAG.sub("", rawReply))
+        cleanReply = strip_stage(SING_TAG.sub("", STATE_TAG.sub("", rawReply)))
         if not cleanReply:
             # 全是旁白没有台词时不能存空行，退回原文
             cleanReply = STATE_TAG.sub("", rawReply).strip()
@@ -484,6 +516,7 @@ class CatgirlCore:
             "meta",
             {
                 "reply": cleanReply,
+                "sing": singTitle,
                 "session": self.session,
                 "mood": profile["mood"],
                 # 这条回复自带的情绪（可能为 None），调用方据此判断该不该发语音

@@ -98,6 +98,10 @@ DEFAULTS = {
     "serverApiKey": "",
     # 语音：云端版默认 Edge 在线音色（免费、免密钥、零部署），
     # 想克隆音色就切 siliconflow / openai，靠配置切换不用改代码
+    # 唱歌曲库：跟数据卷放一起，主人往 /data/songs 里丢文件就能唱
+    "songDir": "/data/songs",
+    # 每次发出去的唱段长度（秒），剪辑会在整句之间的静音下刀，不会唱半句
+    "songClipSeconds": 30,
     "ttsProvider": "edge",
     "ttsVoice": "",
     "ttsModel": "",
@@ -278,6 +282,8 @@ def load_config(overrides=None):
         "CATGIRL_JSON_MODE": "jsonMode",
         "CATGIRL_THINKING_MODE": "thinkingMode",
         "CATGIRL_TIMEOUT": "timeout",
+        "CATGIRL_SONG_DIR": "songDir",
+        "CATGIRL_SONG_CLIP": "songClipSeconds",
         "CATGIRL_TTS_PROVIDER": "ttsProvider",
         "CATGIRL_TTS_VOICE": "ttsVoice",
         "CATGIRL_TTS_MODEL": "ttsModel",

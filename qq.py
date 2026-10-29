@@ -40,7 +40,8 @@ _SUPPORTS_PROXY_ARG = _WS_MAJOR >= 15
 
 from brain import BrainError
 from config import describe, load_config
-from core import CatgirlCore
+from core import SING_TAG, CatgirlCore
+from song import SongError, SongLibrary
 from tts import TTS, TTSError
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -318,6 +319,12 @@ class QQBot:
         self.ownerQq = str(cfg.get("ownerQq") or "").strip()
         self.rate = float(cfg.get("qqRate") or 1.5)
         self.maxChars = int(cfg.get("qqMaxChars") or 400)
+        # 曲库：剪辑结果缓存在数据卷里，同一首第二次不用再算
+        self.songs = SongLibrary(
+            cfg.get("songDir") or os.path.join(cfg["dataDir"], "songs"),
+            cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
+            clipSeconds=cfg.get("songClipSeconds") or 30,
+        )
 
         # 主动搭话：她自己掷骰子决定要不要先开口。掷骰子是本地随机，不花 token；
         # 只有掷中之后那一轮才真的走模型
@@ -477,7 +484,7 @@ class QQBot:
             return "（脑袋突然卡住了…等下再说好不好）", meta
 
         self.stats["回复"] += 1
-        return forQQ(text), meta
+        return forQQ(SING_TAG.sub("", text)), meta
 
     # ------------------------------------------------------------ 发送
     async def call(self, action, params, timeout=15):
@@ -644,10 +651,17 @@ class QQBot:
             log(f"语音合成失败，改发文字：{exc}")
             return False
 
+        return await self._send_record(kind, chatId, result["path"])
+
+    async def _send_record(self, kind, chatId, path):
+        """把一段音频当语音消息发出去。
+
+        协议端不在本机时 file:// 读不到（retcode 1200），所以 base64 是主路，
+        file:// 只当备份。返回是否真的发出去了。
+        """
         action = "send_group_msg" if kind == "group" else "send_private_msg"
         key = "group_id" if kind == "group" else "user_id"
 
-        path = result["path"]
         fileUri = "file://" + os.path.abspath(path).replace("\\", "/")
 
         # base64 数据：协议端读不到我们的文件系统时（NapCat 跑在另一台机器上）用它
@@ -658,9 +672,9 @@ class QQBot:
                 with open(path, "rb") as handle:
                     b64Uri = "base64://" + base64.b64encode(handle.read()).decode("ascii")
             else:
-                log(f"语音文件 {size // 1024}KB 偏大，不做 base64 兜底")
+                log(f"音频文件 {size // 1024}KB 偏大，不做 base64 兜底")
         except OSError as exc:
-            log(f"读语音文件失败：{exc}")
+            log(f"读音频文件失败：{exc}")
 
         if self.preferBase64():
             attempts = [("base64", b64Uri), ("文件路径", fileUri)]
@@ -676,8 +690,25 @@ class QQBot:
                 return True
             log(f"语音发送失败（{label}），换另一种方式")
 
-        log("语音发送失败（协议端可能不支持该格式），改发文字")
         return False
+
+    async def send_song(self, kind, chatId, title):
+        """从曲库挑一首，剪出完整句的一段发出去。返回是否发出去了。"""
+        try:
+            song = self.songs.find(title) if title else self.songs.pick()
+            if not song:
+                log(f"曲库里没有《{title}》，改发文字")
+                return False
+            path = await asyncio.to_thread(self.songs.clip, song)
+        except SongError as exc:
+            log(f"唱歌失败，改发文字：{exc}")
+            return False
+        except Exception as exc:
+            log(f"唱歌异常，改发文字：{exc!r}")
+            return False
+
+        log(f"唱《{song['title']}》：{os.path.basename(path)}")
+        return await self._send_record(kind, chatId, path)
 
     # ------------------------------------------------------------ 主动搭话
     @staticmethod
@@ -916,6 +947,18 @@ class QQBot:
                 # 空串会被 send() 当没有内容静默丢掉，主人这边就是「没反应」。
                 log("模型没给出可发的台词，用兜底一句顶上")
                 reply = "……嗯。"
+            # 唱歌优先于念话：模型写了 <sing title="..."/> 就先发唱段，
+            # 文字只作陪衬，绝不能再把歌词念一遍
+            singTitle = (meta or {}).get("sing")
+            if singTitle:
+                if await self.send_song(kind, chatId, singTitle):
+                    if reply.strip():
+                        await self.send(kind, chatId, reply, session)
+                    if emojiName:
+                        await self.send_image(kind, chatId, emojiName)
+                    return
+                log("唱段没发出去，按普通回复处理")
+
             wantVoice, why = self.voice_decision(
                 kind, rawText, reply, meta, session, bool(records)
             )

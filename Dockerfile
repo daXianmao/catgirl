@@ -21,7 +21,8 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
 # 装上 tzdata 并指向上海，让 date / time.strftime 这些走系统时区的地方都对。
 ENV DEBIAN_FRONTEND=noninteractive
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends tzdata \
+    # ffmpeg 用于唱歌：探测静音找出整句边界，再剪出 30 秒唱段
+    && apt-get install -y --no-install-recommends tzdata ffmpeg \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \
     && rm -rf /var/lib/apt/lists/*
