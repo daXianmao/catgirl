@@ -172,7 +172,13 @@ def forQQ(text):
     # 看着像刷屏。中文句末标点自带停顿，连接起来不影响阅读。
     merged = re.sub(r"[ \t　]*\n+[ \t　]*", "", cleaned).strip()
     # 合并之后行首的「——」「，」会紧贴上一句的句号，出现「。，」这种鬼东西
-    return re.sub(r"([。！？!?])[，、；：]", r"\1", merged).strip()
+    merged = re.sub(r"([。！？!?])[，、；：]", r"\1", merged).strip()
+    # 波浪号在提示词里禁了但它还是爱加（「想转圈圈～」）。分三种处理：
+    # 挨着标点的直接去掉，剩下句中的换成逗号，别把两句话粘在一起
+    merged = re.sub(r"(?<=[。！？!?，、；：])[～〜]+", "", merged)
+    merged = re.sub(r"[～〜]+(?=[。！？!?，、；：]|$)", "", merged)
+    merged = re.sub(r"[～〜]+", "，", merged)
+    return merged.strip()
 
 
 def split_text(text, limit=400):
