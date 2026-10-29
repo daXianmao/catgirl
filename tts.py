@@ -17,6 +17,7 @@
 内容与你填的参考文本逐字一致。音质差一倍，克隆效果差十倍。
 """
 import asyncio
+import base64
 import hashlib
 import json
 import mimetypes
@@ -110,6 +111,16 @@ TTS_PROVIDERS = {
         "speed": 1.0,
         "apiKeyEnv": "",
     },
+    # 阿里云百炼 CosyVoice：音色靠「声音复刻」提前建好，拿到 voice id 填进 ttsVoice。
+    # 音色和模型代次是绑定的，v3 的音色不能拿去 v3.5 用（会报 Engine error code 418）。
+    "cosyvoice": {
+        "baseUrl": "https://dashscope.aliyuncs.com/api/v1",
+        "model": "cosyvoice-v3-flash",
+        "voice": "longanhuan_v3",
+        "format": "mp3",
+        "speed": 1.0,
+        "apiKeyEnv": "DASHSCOPE_API_KEY",
+    },
     "none": {
         "baseUrl": "",
         "model": "",
@@ -149,6 +160,13 @@ TTS_PROVIDER_INFO = {
         "hint": "参考音频克隆，需另起一个 api_v2 服务（可以跨机器），本机不占资源",
         "clone": True,
         "needsKey": False,
+        "offline": False,
+    },
+    "cosyvoice": {
+        "label": "阿里云百炼 CosyVoice",
+        "hint": "声音复刻要用 tools/clone_voice.py 先建音色，拿到 voice id 填进来；音色与模型绑定",
+        "clone": True,
+        "needsKey": True,
         "offline": False,
     },
     "openai": {
@@ -440,6 +458,8 @@ class TTS:
                     self._sovits(spoken, tmpPath)
                 elif self.provider in ("siliconflow", "openai"):
                     self._openaiSpeech(spoken, tmpPath, fmt)
+                elif self.provider == "cosyvoice":
+                    self._cosyvoice(spoken, tmpPath, fmt)
                 else:
                     raise TTSError(f"不认识的 TTS provider：{self.provider}")
                 if not os.path.exists(tmpPath) or os.path.getsize(tmpPath) < 200:
@@ -562,6 +582,59 @@ class TTS:
             audio = resp.read()
         with open(outPath, "wb") as handle:
             handle.write(audio)
+
+    def _cosyvoice(self, text, outPath, fmt):
+        """阿里云百炼 CosyVoice：POST /services/audio/tts/SpeechSynthesizer。
+
+        跟 OpenAI 那套不一样，它回的不是二进制音频，而是一个签名过的 OSS 链接
+        （或 base64），要再下载一次。链接带过期时间，别缓存它，直接下载。
+        音色必须和 model 同一代：v3 的音色配 v3.5 会回 Engine error code 418。
+        """
+        # ttsBaseUrl 是给自建服务用的（默认还留着 127.0.0.1:9880），
+        # 换成云服务商时必须忽略它，否则会去连本地端口
+        configured = (self.cfg.get("ttsBaseUrl") or "").strip().rstrip("/")
+        host = urllib.parse.urlparse(configured).hostname if configured else ""
+        if host and host not in ("127.0.0.1", "localhost", "::1"):
+            baseUrl = configured
+        else:
+            baseUrl = TTS_PROVIDERS["cosyvoice"]["baseUrl"].rstrip("/")
+        key = self.apiKey()
+        if not key:
+            raise TTSError("cosyvoice 需要密钥：设 CATGIRL_TTS_KEY，或把 DASHSCOPE_API_KEY 放进环境变量")
+
+        model = self.profile.data.get("model") or TTS_PROVIDERS["cosyvoice"]["model"]
+        voice = self.profile.voice or TTS_PROVIDERS["cosyvoice"]["voice"]
+
+        payload = {
+            "model": model,
+            "input": {
+                "text": text,
+                "voice": voice,
+                "format": fmt,
+                "sample_rate": 24000,
+            },
+        }
+        speed = float(self.profile.data.get("speed") or 1.0)
+        if abs(speed - 1.0) > 0.01:
+            # 百炼用 rate 表示语速，0.5~2 之间
+            payload["input"]["rate"] = round(max(0.5, min(2.0, speed)), 2)
+
+        headers = {"Authorization": f"Bearer {key}"}
+        with _open(f"{baseUrl}/services/audio/tts/SpeechSynthesizer", payload, headers) as resp:
+            body = json.loads(resp.read().decode("utf-8", "replace"))
+
+        audio = ((body or {}).get("output") or {}).get("audio") or {}
+        if audio.get("data"):
+            raw = base64.b64decode(audio["data"])
+        elif audio.get("url"):
+            with _open(audio["url"]) as resp:
+                raw = resp.read()
+        else:
+            # 百炼的错误常常 200 返回，正文里带 code/message，得自己拆
+            raise TTSError(f"百炼没给音频：{json.dumps(body, ensure_ascii=False)[:200]}")
+
+        with open(outPath, "wb") as handle:
+            handle.write(raw)
 
     def _sovits(self, text, outPath):
         """自建 GPT-SoVITS api_v2：GET /tts，参考音频即音色。
