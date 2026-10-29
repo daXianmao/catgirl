@@ -20,8 +20,15 @@ ENV PIP_INDEX_URL=${PIP_INDEX_URL} \
 # 基础镜像默认 UTC，比北京时间慢 8 小时：问她几点会答错，日志时间也错位。
 # 装上 tzdata 并指向上海，让 date / time.strftime 这些走系统时区的地方都对。
 ENV DEBIAN_FRONTEND=noninteractive
+# 官方 deb.debian.org 在国内经常几 KB/s，装 ffmpeg 这种上百个依赖会拖到半小时以上。
+# 先换腾讯云镜像再装；换不了也不影响构建（照样回退官方源）。
+RUN set -eux; \
+    for f in /etc/apt/sources.list /etc/apt/sources.list.d/debian.sources; do \
+        if [ -f "$f" ]; then sed -i 's|deb.debian.org|mirrors.cloud.tencent.com|g; s|security.debian.org|mirrors.cloud.tencent.com|g' "$f"; fi; \
+    done
+
+# tzdata 是时区；ffmpeg 用于唱歌（探测静音找整句边界，再剪 30 秒唱段）
 RUN apt-get update \
-    # ffmpeg 用于唱歌：探测静音找出整句边界，再剪出 30 秒唱段
     && apt-get install -y --no-install-recommends tzdata ffmpeg \
     && ln -snf /usr/share/zoneinfo/$TZ /etc/localtime \
     && echo $TZ > /etc/timezone \

@@ -693,22 +693,22 @@ class QQBot:
         return False
 
     async def send_song(self, kind, chatId, title):
-        """从曲库挑一首，剪出完整句的一段发出去。返回是否发出去了。"""
+        """从曲库挑一首，剪出完整句的一段发出去。发出去了就返回歌名，否则 None。"""
         try:
             song = self.songs.find(title) if title else self.songs.pick()
             if not song:
                 log(f"曲库里没有《{title}》，改发文字")
-                return False
+                return None
             path = await asyncio.to_thread(self.songs.clip, song)
         except SongError as exc:
             log(f"唱歌失败，改发文字：{exc}")
-            return False
+            return None
         except Exception as exc:
             log(f"唱歌异常，改发文字：{exc!r}")
-            return False
+            return None
 
         log(f"唱《{song['title']}》：{os.path.basename(path)}")
-        return await self._send_record(kind, chatId, path)
+        return song["title"] if await self._send_record(kind, chatId, path) else None
 
     # ------------------------------------------------------------ 主动搭话
     @staticmethod
@@ -942,18 +942,24 @@ class QQBot:
         async with session.lock:
             reply, meta = await self.reply_text(session, userText)
             reply, emojiName = self.take_emoji(reply, session)
-            if not reply.strip():
+            singTitle = (meta or {}).get("sing")
+            if not reply.strip() and not singTitle:
                 # 出口清洗把整条回复清空了（模型只给了动作描写或只发了表情），
                 # 空串会被 send() 当没有内容静默丢掉，主人这边就是「没反应」。
+                # 要唱歌时不能补这句，否则主人会先听到「……嗯。」再接一段歌。
                 log("模型没给出可发的台词，用兜底一句顶上")
                 reply = "……嗯。"
             # 唱歌优先于念话：模型写了 <sing title="..."/> 就先发唱段，
             # 文字只作陪衬，绝不能再把歌词念一遍
-            singTitle = (meta or {}).get("sing")
             if singTitle:
-                if await self.send_song(kind, chatId, singTitle):
-                    if reply.strip():
-                        await self.send(kind, chatId, reply, session)
+                sungTitle = await self.send_song(kind, chatId, singTitle)
+                if sungTitle:
+                    # 模型选完歌还爱反问「唱哪首？」——直接按实际唱的补一句，
+                    # 不然主人收到的是一句问话加一段歌，前后矛盾
+                    line = reply.strip()
+                    if not line or "哪首" in line or "哪一首" in line:
+                        line = f"那唱《{sungTitle}》吧"
+                    await self.send(kind, chatId, line, session)
                     if emojiName:
                         await self.send_image(kind, chatId, emojiName)
                     return

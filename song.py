@@ -1,8 +1,10 @@
 """曲库：挑一首歌，剪出 30 秒左右的一整段发出去。
 
-剪之前先用 ffmpeg 探测静音，把整首歌切成「一句一句」，再从某个句头开始
-累加整句，落进 28~36 秒这个区间，最后在两句之间的静音里下刀。
-这样发出去的片段一定是完整的句子，不会出现唱半句就被掐掉的情况。
+下刀位置决定会不会「唱半句」。做法是两步：
+  1. ffmpeg silencedetect 找真正的静音；
+  2. 再把音频降采样算能量包络，取局部极小值当换气口。
+广播级流行歌几乎没有真静音，只靠第 1 步会整首只认出一句，所以第 2 步是主力。
+起点和终点都取换气口，再在两端加 100~400ms 淡入淡出，听起来就是完整的一段。
 
 曲库目录默认 /data/songs（跟着数据卷，主人自己往里丢文件就行）：
   - 支持 mp3 / wav / flac / m4a / ogg，歌名默认取文件名
@@ -10,13 +12,19 @@
         {"星愿.mp3": {"title": "星愿", "aliases": ["小星星", "星"]}}
 """
 
+import array
 import difflib
 import hashlib
 import json
+import math
 import os
 import re
 import subprocess
-import tempfile
+
+try:  # audioop 在 Python 3.13 被移除，3.12 仍自带（算能量快得多）
+    import audioop
+except ImportError:  # pragma: no cover
+    audioop = None
 
 AUDIO_EXT = (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus")
 
@@ -24,8 +32,13 @@ AUDIO_EXT = (".mp3", ".wav", ".flac", ".m4a", ".ogg", ".opus")
 SILENCE_NOISE = "-33dB"
 SILENCE_MIN = 0.30
 
-# 太短的「有声段」多半是呼吸或换气声，不算一句
-MIN_PHRASE = 0.60
+# 广播级流行歌几乎没有真正的静音，光靠 silencedetect 会整首只切出一句。
+# 所以再算一层能量包络：把音频降采样成 8kHz 单声道，按 50ms 一帧求 RMS，
+# 局部极小值就是换气口，在那里下刀不会切到字中间。
+ENV_RATE = 8000
+ENV_FRAME = 400          # 400 采样 = 50ms
+ENV_WINDOW = 6           # 极小值判定窗口（±6 帧 = ±300ms）
+ENV_DIP = 0.65           # 低于中位能量 65% 才算谷底
 
 
 class SongError(Exception):
@@ -83,28 +96,39 @@ class SongLibrary:
         return [item["title"] for item in self.entries()]
 
     def find(self, query):
-        """按歌名/别名找歌；找不到返回 None。"""
+        """按歌名/别名找歌；找不到返回 None。
+
+        匹配要收着点：点歌文本里常带「唱首」「来一段」这些词，用宽松包含会把
+        「不存在的一首歌」误判成曲库里那首〈歌〉。所以单字标题只认完全一致，
+        标题出现在点歌文本里时还要求它至少占一半长度。
+        """
         key = _norm(query)
         if not key:
             return None
         items = self.entries()
+
+        def namesOf(item):
+            return [_norm(item["title"])] + [_norm(a) for a in item["aliases"]]
+
         for item in items:  # 完全一致
-            if _norm(item["title"]) == key or key in [_norm(a) for a in item["aliases"]]:
+            if key in [n for n in namesOf(item) if n]:
                 return item
-        for item in items:  # 包含关系（「唱个星愿」能对上「星愿」）
-            names = [_norm(item["title"])] + [_norm(a) for a in item["aliases"]]
-            if any(key and (key in n or n in key) for n in names if n):
+        for item in items:  # 点歌文本是标题的一部分：「春庭」->「春庭雪」
+            if any(len(n) >= 2 and n.startswith(key) for n in namesOf(item) if n):
                 return item
-        # 最后按相似度兜底，容忍错别字
+        for item in items:  # 标题出现在点歌文本里：「唱个追光使者」->「追光使者」
+            if any(len(n) >= 2 and n in key and len(n) * 2 >= len(key) for n in namesOf(item) if n):
+                return item
+        # 最后按相似度兜底，容忍错别字（短名字容易误配，门槛抬高）
         best, bestScore = None, 0.0
         for item in items:
-            for n in [_norm(item["title"])] + [_norm(a) for a in item["aliases"]]:
-                if not n:
+            for n in namesOf(item):
+                if len(n) < 2:
                     continue
                 score = difflib.SequenceMatcher(None, key, n).ratio()
                 if score > bestScore:
                     best, bestScore = item, score
-        return best if bestScore >= 0.62 else None
+        return best if bestScore >= 0.75 else None
 
     def pick(self):
         """没点歌时随机挑一首，优先没唱过的由调用方决定，这里只给第一首。"""
@@ -169,49 +193,86 @@ class SongLibrary:
             pairs.append((max(0.0, begin), stop))
         return pairs
 
-    def _phrases(self, src, duration):
-        """把有声段切成一句一句：静音之间的部分就是整句。"""
-        phrases, cursor = [], 0.0
+    def _run_raw(self, args):
+        """要拿二进制输出（PCM）时用这个，不能走 text=True。"""
+        try:
+            return subprocess.run(args, capture_output=True, timeout=180)
+        except FileNotFoundError as exc:
+            raise SongError("镜像里没有 ffmpeg，唱歌功能不可用") from exc
+        except subprocess.TimeoutExpired as exc:
+            raise SongError("ffmpeg 超时") from exc
+
+    def _envelope(self, src):
+        """把整首降成 50ms 一帧的能量，返回 [(时刻, 相对能量)]。"""
+        proc = self._run_raw([
+            "ffmpeg", "-v", "error", "-i", src,
+            "-ac", "1", "-ar", str(ENV_RATE), "-f", "s16le", "-",
+        ])
+        if proc.returncode != 0 or not proc.stdout:
+            return []
+        samples = array.array("h")
+        samples.frombytes(proc.stdout[: len(proc.stdout) // 2 * 2])
+        frames = []
+        step = ENV_FRAME
+        raw = memoryview(proc.stdout)
+        for offset in range(0, len(samples) - step + 1, step):
+            if audioop is not None:
+                level = audioop.rms(raw[offset * 2: (offset + step) * 2], 2)
+            else:  # 没有 audioop 时退回纯 Python，慢但结果一样
+                level = math.sqrt(sum(v * v for v in samples[offset: offset + step]) / step)
+            frames.append((offset / ENV_RATE, level))
+        return frames
+
+    def _cut_points(self, src, duration):
+        """所有适合下刀的时刻：真静音 + 能量谷底，去重后按时间排序。"""
+        points = []
         for begin, stop in self._silences(src):
-            if begin - cursor >= MIN_PHRASE:
-                phrases.append((cursor, begin))
-            cursor = max(cursor, stop)
-        if duration - cursor >= MIN_PHRASE:
-            phrases.append((cursor, duration))
-        return phrases
+            points.append((begin + stop) / 2)
+        frames = self._envelope(src)
+        if frames:
+            levels = sorted(f[1] for f in frames)
+            median = levels[len(levels) // 2] or 1.0
+            for index in range(len(frames)):
+                lo = max(0, index - ENV_WINDOW)
+                hi = min(len(frames), index + ENV_WINDOW + 1)
+                value = frames[index][1]
+                if value <= min(f[1] for f in frames[lo:hi]) and value < median * ENV_DIP:
+                    points.append(frames[index][0])
+        points.sort()
+        merged = []
+        for point in points:  # 400ms 内的合成一个，取最早那个（谷底起点）
+            if merged and point - merged[-1] < 0.4:
+                continue
+            merged.append(point)
+        return [p for p in merged if 0.5 < p < duration - 0.5]
 
     def _window(self, src, duration, target):
-        """挑一段「整句」窗口：长度贴近 target，尽量不从最开头切。"""
+        """挑一段窗口：起点和终点都落在换气口，长度贴近 target。"""
         if duration <= target + 1:
             return 0.0, duration  # 本来就短，整首放
 
-        phrases = self._phrases(src, duration)
-        best = None
-        for i, (start, _stop) in enumerate(phrases):
-            for j in range(i, len(phrases)):
-                length = phrases[j][1] - start
-                if length < target - 2:  # 还不够长，再多加一句
-                    continue
-                if length > target + 6:  # 太长，这一组不合适
-                    break
-                # 从最开头起唱会连着前奏，扣一点分；其它按与目标的接近程度排
-                score = abs(length - target) + (3.0 if start < 6 else 0.0)
-                if best is None or score < best[0]:
-                    best = (score, start, length)
-                break
+        cuts = self._cut_points(src, duration)
+        if not cuts:
+            return 0.0, min(target, duration)
 
-        if best:
-            return best[1], best[2]
+        # 起点避开前奏：优先 20 秒附近，歌短就按比例往前挪
+        preferred = min(20.0, duration * 0.2)
+        start = min(cuts, key=lambda t: abs(t - preferred))
 
-        # 探测不到静音（连续伴奏、纯电子曲）：退到在附近找最长静音下刀
-        silences = self._silences(src)
-        if silences:
-            point = min(silences, key=lambda p: abs((p[0] + p[1]) / 2 - target))
-            start = 0.0 if point[0] < 1.0 else max(0.0, point[0] - target)
-            length = point[0] - start
-            if length >= target - 4:
+        # 终点取离 start+target 最近的换气口，长度允许 27~38 秒
+        tail = [t for t in cuts if t > start]
+        if tail:
+            best = min(tail, key=lambda t: abs((t - start) - target))
+            length = best - start
+            if target - 3 <= length <= target + 8:
                 return start, length
-        return 0.0, min(target, duration)
+            if length > target + 8:  # 换气口太稀，退一步硬切但也落在谷底
+                return start, target
+
+        # 起点太靠后（歌尾没有换气口了），退回从头找
+        if start > 10 and duration - start < target + 3:
+            return 0.0, min(target, duration)
+        return start, min(target, duration - start)
 
     def _cut(self, src, out, start, length):
         fadeOut = max(0.2, min(0.6, length * 0.05))
