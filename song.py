@@ -55,10 +55,13 @@ def _norm(text):
 
 
 class SongLibrary:
-    def __init__(self, dirs, cacheDir=None, clipSeconds=30, clipMin=None, clipMax=None):
+    def __init__(self, dirs, cacheDir=None, clipSeconds=30, clipMin=None, clipMax=None,
+                 vocalSubDir="vocals"):
         if isinstance(dirs, str):
             dirs = [dirs]
         self.dirs = [d for d in dirs if d]
+        # 人声轨放在 <曲库>/vocals 下，同名文件即生效；传空串则关掉，一律用原曲
+        self.vocalSubDir = vocalSubDir if vocalSubDir is not None else "vocals"
         self.cacheDir = cacheDir or os.path.join(self.dirs[0] if self.dirs else "/tmp", ".cache")
         # clipSeconds 是老配置里的「长度」，现在当上限用；min/max 才是真正的随机区间
         self.clipMax = float(clipMax or clipSeconds or 30)
@@ -91,6 +94,7 @@ class SongLibrary:
                         index = json.load(handle) or {}
                 except (OSError, ValueError):
                     index = {}
+            vocalDir = os.path.join(root, self.vocalSubDir) if self.vocalSubDir else ""
             for name in sorted(os.listdir(root)):
                 if not name.lower().endswith(AUDIO_EXT):
                     continue
@@ -98,8 +102,29 @@ class SongLibrary:
                 meta = index.get(name) or {}
                 title = meta.get("title") or os.path.splitext(name)[0].replace("_", " ").strip()
                 aliases = [str(a) for a in (meta.get("aliases") or []) if str(a).strip()]
-                out.append({"path": path, "file": name, "title": title, "aliases": aliases})
+                out.append({
+                    "path": path,
+                    "vocal": self._vocalOf(vocalDir, name),
+                    "file": name,
+                    "title": title,
+                    "aliases": aliases,
+                })
         return out
+
+    def _vocalOf(self, vocalDir, name):
+        """同名的人声轨（优先 mp3，其次原扩展名）；没有就返回 None。"""
+        if not vocalDir or not os.path.isdir(vocalDir):
+            return None
+        stem = os.path.splitext(name)[0]
+        for ext in (".mp3",) + AUDIO_EXT:
+            candidate = os.path.join(vocalDir, stem + ext)
+            if os.path.exists(candidate):
+                return candidate
+        return None
+
+    def vocalCount(self):
+        """有多少首歌已经有人声轨（给人看的统计）。"""
+        return sum(1 for item in self.entries() if item.get("vocal"))
 
     def titles(self):
         return [item["title"] for item in self.entries()]
@@ -140,9 +165,13 @@ class SongLibrary:
         return best if bestScore >= 0.75 else None
 
     def pick(self):
-        """没点歌时随机挑一首，优先没唱过的由调用方决定，这里只给第一首。"""
+        """没点歌时随机挑一首。
+
+        原来写的是 `items[0]`，结果只要她不点名就永远唱同一首，
+        跟「随机挑」的意思不符，这里改成真随机。
+        """
         items = self.entries()
-        return items[0] if items else None
+        return random.choice(items) if items else None
 
     # -------------------------------------------------------------- 剪辑
     def _targetLength(self):
@@ -152,9 +181,15 @@ class SongLibrary:
         return round(random.uniform(self.clipMin, self.clipMax), 1)
 
     def clip(self, song, target=None):
-        """剪出完整句的一段，返回 mp3 路径（同参数走缓存）。"""
+        """剪出完整句的一段，返回 mp3 路径（同参数走缓存）。
+
+        有人声轨就用它（伴奏已被剥掉，换气口也更清晰），没有就退回原曲。
+        """
         target = float(target or self._targetLength())
-        src = song["path"] if isinstance(song, dict) else str(song)
+        src = None
+        if isinstance(song, dict):
+            src = song.get("vocal") or song.get("path")
+        src = src or str(song)
         if not os.path.exists(src):
             raise SongError(f"音频不存在：{src}")
         os.makedirs(self.cacheDir, exist_ok=True)

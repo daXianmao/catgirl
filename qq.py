@@ -330,6 +330,7 @@ class QQBot:
             cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
             clipSeconds=cfg.get("songClipMax") or cfg.get("songClipSeconds") or 30,
             clipMin=cfg.get("songClipMin") or 10,
+            vocalSubDir=cfg.get("songVocalSubDir") if cfg.get("songVocalSubDir") is not None else "vocals",
         )
 
         # 主动搭话：她自己掷骰子决定要不要先开口。掷骰子是本地随机，不花 token；

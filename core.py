@@ -154,6 +154,7 @@ class CatgirlCore:
             cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
             clipSeconds=clipMax,
             clipMin=cfg.get("songClipMin") or 10,
+            vocalSubDir=cfg.get("songVocalSubDir") if cfg.get("songVocalSubDir") is not None else "vocals",
         )
         self.dbPath = dbPath or os.path.join(cfg["dataDir"], "memory.db")
         self.store = MemoryStore(self.dbPath)

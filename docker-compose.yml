@@ -25,6 +25,7 @@ services:
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
       # 唱歌曲库（跟着数据卷持久化）与每段长度
       CATGIRL_SONG_DIR: ${CATGIRL_SONG_DIR:-/data/songs}
+      CATGIRL_SONG_VOCAL_SUB: ${CATGIRL_SONG_VOCAL_SUB:-vocals}
       CATGIRL_SONG_CLIP: ${CATGIRL_SONG_CLIP:-30}
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-10}
@@ -85,6 +86,7 @@ services:
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
       # 唱歌曲库（跟着数据卷持久化）与每段长度
       CATGIRL_SONG_DIR: ${CATGIRL_SONG_DIR:-/data/songs}
+      CATGIRL_SONG_VOCAL_SUB: ${CATGIRL_SONG_VOCAL_SUB:-vocals}
       CATGIRL_SONG_CLIP: ${CATGIRL_SONG_CLIP:-30}
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-10}
@@ -167,6 +169,7 @@ services:
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
       # 唱歌曲库（跟着数据卷持久化）与每段长度
       CATGIRL_SONG_DIR: ${CATGIRL_SONG_DIR:-/data/songs}
+      CATGIRL_SONG_VOCAL_SUB: ${CATGIRL_SONG_VOCAL_SUB:-vocals}
       CATGIRL_SONG_CLIP: ${CATGIRL_SONG_CLIP:-30}
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-10}
@@ -226,6 +229,7 @@ services:
       CATGIRL_TTS_VOICE: ${CATGIRL_TTS_VOICE:-}
       # 唱歌曲库（跟着数据卷持久化）与每段长度
       CATGIRL_SONG_DIR: ${CATGIRL_SONG_DIR:-/data/songs}
+      CATGIRL_SONG_VOCAL_SUB: ${CATGIRL_SONG_VOCAL_SUB:-vocals}
       CATGIRL_SONG_CLIP: ${CATGIRL_SONG_CLIP:-30}
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-10}
