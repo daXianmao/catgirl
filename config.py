@@ -106,9 +106,9 @@ DEFAULTS = {
     # 每次发出去的唱段长度（秒），剪辑会在整句之间的静音下刀，不会唱半句。
     # 实际长度在 [songClipMin, songClipMax] 里随机取，别每次都一样长。
     # songClipSeconds 只留作上限的兼容别名（老配置只填了它就当上限用）。
-    "songClipSeconds": 30,
-    "songClipMin": 10,
-    "songClipMax": 30,
+    "songClipSeconds": 40,
+    "songClipMin": 25,
+    "songClipMax": 40,
     "ttsProvider": "edge",
     "ttsVoice": "",
     "ttsModel": "",

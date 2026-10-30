@@ -148,12 +148,12 @@ class CatgirlCore:
 
         # 曲库：只读目录 + 剪好的片段缓存，交给数据卷一起持久化
         # 片段长度每次在 [clipMin, clipMax] 里随机，最长不超过 clipSeconds
-        clipMax = cfg.get("songClipMax") or cfg.get("songClipSeconds") or 30
+        clipMax = cfg.get("songClipMax") or cfg.get("songClipSeconds") or 40
         self.songs = SongLibrary(
             cfg.get("songDir") or os.path.join(cfg["dataDir"], "songs"),
             cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
             clipSeconds=clipMax,
-            clipMin=cfg.get("songClipMin") or 10,
+            clipMin=cfg.get("songClipMin") or 25,
             vocalSubDir=cfg.get("songVocalSubDir") if cfg.get("songVocalSubDir") is not None else "vocals",
         )
         self.dbPath = dbPath or os.path.join(cfg["dataDir"], "memory.db")
@@ -291,7 +291,10 @@ class CatgirlCore:
                 "主人想听歌时，从曲库里挑一首直接唱，别再问他听哪首。\n"
                 "回复最后单独写 <sing title=\"歌名\"/>，系统会把这一段录音发出去。\n"
                 "光是嘴上说要唱、却没写这个标签，他就什么也听不到——说要唱就必须带标签。\n"
-                "文字只写一句「唱哪首」就够，不要写歌词、也不要形容自己唱得怎么样。\n"
+                "写了标签的这条回复，文字尽量空着；真要说话就只说一句，"
+                "而且不许报歌名、不许复述歌名，也不要说「那唱《X》吧」。\n"
+                "想说就说一句「好听吗」「还想听吗」这种问听感的话，或者干脆什么都不说。"
+                "不要写歌词，也不要形容自己唱得怎么样。\n"
                 "他点的歌不在曲库里，就别写标签，照实说还没学会，等学会了再唱。"
             )
         else:

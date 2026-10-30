@@ -324,12 +324,12 @@ class QQBot:
         self.rate = float(cfg.get("qqRate") or 1.5)
         self.maxChars = int(cfg.get("qqMaxChars") or 400)
         # 曲库：剪辑结果缓存在数据卷里，同一首第二次不用再算
-        # 片段长度跟 core 那边保持同一套区间（10~30 秒随机）
+        # 片段长度跟 core 那边保持同一套区间（25~40 秒随机）
         self.songs = SongLibrary(
             cfg.get("songDir") or os.path.join(cfg["dataDir"], "songs"),
             cacheDir=os.path.join(cfg["dataDir"], "songs-cache"),
-            clipSeconds=cfg.get("songClipMax") or cfg.get("songClipSeconds") or 30,
-            clipMin=cfg.get("songClipMin") or 10,
+            clipSeconds=cfg.get("songClipMax") or cfg.get("songClipSeconds") or 40,
+            clipMin=cfg.get("songClipMin") or 25,
             vocalSubDir=cfg.get("songVocalSubDir") if cfg.get("songVocalSubDir") is not None else "vocals",
         )
 
@@ -717,6 +717,29 @@ class QQBot:
         log(f"唱《{song['title']}》：{os.path.basename(path)}")
         return song["title"] if await self._send_record(kind, chatId, path) else None
 
+    # 唱完之后能说的话：只问听感，就这几句，别自己发挥
+    SING_ASKS = ("好听吗", "大家喜欢吗", "唱得怎么样", "还想听吗")
+
+    def sing_followup(self, reply, title):
+        """唱完再配的那句话。返回空串表示这次不说话了。
+
+        两条硬规矩：
+          1. 主人刚听完，别再被念一遍歌名（模型很爱复述「那唱《X》吧」）；
+          2. 模型选了歌还反问「唱哪首」时，歌已经放了，这句问话就是自相矛盾。
+        剩下的才有资格发出去；没有就一半机会干脆安静，一半机会问一句喜不喜欢。
+        """
+        line = (reply or "").strip()
+        if line and ("哪首" in line or "哪一首" in line):
+            line = ""
+        if line and title:
+            # 书名号和引号摘掉再比，带不带都算复述
+            bare = re.sub(r"[《》〈〉「」『』\"'“”]", "", line)
+            if title in bare:
+                line = ""
+        if line:
+            return line
+        return random.choice(("", "") + self.SING_ASKS)
+
     # ------------------------------------------------------------ 主动搭话
     @staticmethod
     def _quiet_range(spec):
@@ -961,12 +984,10 @@ class QQBot:
             if singTitle:
                 sungTitle = await self.send_song(kind, chatId, singTitle)
                 if sungTitle:
-                    # 模型选完歌还爱反问「唱哪首？」——直接按实际唱的补一句，
-                    # 不然主人收到的是一句问话加一段歌，前后矛盾
-                    line = reply.strip()
-                    if not line or "哪首" in line or "哪一首" in line:
-                        line = f"那唱《{sungTitle}》吧"
-                    await self.send(kind, chatId, line, session)
+                    # 唱完只问听感，或者干脆不说话；绝不再报一次歌名
+                    line = self.sing_followup(reply, sungTitle)
+                    if line:
+                        await self.send(kind, chatId, line, session)
                     if emojiName:
                         await self.send_image(kind, chatId, emojiName)
                     return

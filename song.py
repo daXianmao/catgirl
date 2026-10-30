@@ -55,7 +55,7 @@ def _norm(text):
 
 
 class SongLibrary:
-    def __init__(self, dirs, cacheDir=None, clipSeconds=30, clipMin=None, clipMax=None,
+    def __init__(self, dirs, cacheDir=None, clipSeconds=40, clipMin=None, clipMax=None,
                  vocalSubDir="vocals"):
         if isinstance(dirs, str):
             dirs = [dirs]
@@ -64,8 +64,8 @@ class SongLibrary:
         self.vocalSubDir = vocalSubDir if vocalSubDir is not None else "vocals"
         self.cacheDir = cacheDir or os.path.join(self.dirs[0] if self.dirs else "/tmp", ".cache")
         # clipSeconds 是老配置里的「长度」，现在当上限用；min/max 才是真正的随机区间
-        self.clipMax = float(clipMax or clipSeconds or 30)
-        self.clipMin = float(clipMin or min(10.0, self.clipMax))
+        self.clipMax = float(clipMax or clipSeconds or 40)
+        self.clipMin = float(clipMin or min(25.0, self.clipMax))
         if self.clipMin > self.clipMax:
             self.clipMin, self.clipMax = self.clipMax, self.clipMin
         self.clipSeconds = self.clipMax  # 兼容旧调用
