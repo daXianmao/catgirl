@@ -992,6 +992,9 @@ class QQBot:
                         await self.send_image(kind, chatId, emojiName)
                     return
                 log("唱段没发出去，按普通回复处理")
+                if not reply.strip():
+                    # 唱失败了、模型又只写了标签没写词，主人什么也收不到，补一句
+                    reply = "诶，这次唱不出来，等下再试试"
 
             wantVoice, why = self.voice_decision(
                 kind, rawText, reply, meta, session, bool(records)
