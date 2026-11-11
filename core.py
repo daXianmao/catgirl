@@ -10,6 +10,7 @@ import threading
 import time
 from datetime import datetime, timedelta, timezone
 
+import bili
 from brain import Brain, BrainError
 from memory import MemoryStore
 from song import SongLibrary
@@ -23,6 +24,11 @@ STATE_TAG = re.compile(r"<state\s*([^>]*?)\s*/?>\s*$", re.S)
 # 想唱歌时模型写 <sing title="歌名"/>，服务端据此发一段录音
 SING_TAG = re.compile(r"<sing\s+title\s*=\s*\"([^\"]*)\"\s*/?>", re.I)
 ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
+
+
+def log(text):
+    print(f"[{time.strftime('%H:%M:%S')}] {text}", flush=True)
+
 
 # 模型偶尔还是会滑回小说体（括号旁白 + 引号台词 + 分行）。
 # 写进历史之前先把这些剥干净：历史是它的模仿源，留一条脏的就会被学一条。
@@ -158,7 +164,10 @@ class CatgirlCore:
         )
         self.dbPath = dbPath or os.path.join(cfg["dataDir"], "memory.db")
         self.store = MemoryStore(self.dbPath)
-
+        # B 站取稿：容器里没有 node，真正的取稿跑在宿主机的 bili-bridge 上。
+        # 地址为空就等于这个能力关掉了，行为和以前完全一样。
+        self.biliBridge = (cfg.get("biliBridge") or "").strip()
+        self.biliToken = (cfg.get("biliBridgeToken") or "").strip()
         self._turnLock = threading.Lock()
         self.notices = []
         self.noticeLock = threading.Lock()
@@ -461,6 +470,43 @@ class CatgirlCore:
                 meta = payload
         return text, meta
 
+    # ---------------------------------------------------------------- 看视频
+    def attach_bili(self, userText):
+        """话里带 BV 号，就先把视频稿取回来贴在这一轮的上下文后面。
+
+        只改「模型看到什么」，不改「历史里记什么」——几千字的稿子绝不能写进
+        对话历史，否则后面每一轮都拖着它，上下文很快就爆了。
+        """
+        if not self.biliBridge:
+            return userText, None
+        bv = bili.find_bv(userText)
+        if not bv:
+            return userText, None
+
+        try:
+            payload = bili.fetch(bv, self.biliBridge, self.biliToken)
+        except bili.BiliError as exc:
+            log(f"看视频失败（{bv}）：{exc}")
+            return (
+                userText + f"\n\n（主人发来视频 {bv}，但没取到内容：{exc}。"
+                "别装作看过，直说没看成。）",
+                None,
+            )
+
+        material = bili.as_context(payload)
+        log(f"看视频 {bv}：《{payload.get('title')}》 {payload.get('chars', 0)} 字"
+            f"（{payload.get('route')}，{payload.get('elapsed')}s）")
+        # 看过的视频留一条记忆，以后她自己能想起来
+        if payload.get("title"):
+            try:
+                self.add_memory(
+                    f"看过B站视频《{payload['title']}》，作者{payload.get('author') or '未知'}",
+                    kind="event", importance=3.0,
+                )
+            except Exception as exc:
+                log(f"记视频失败：{exc!r}")
+        return userText + "\n\n" + material, payload
+
     def respond_iter(self, userText, hiddenText=None):
         """流式：yield ("delta", 文本) ... 最后 yield ("meta", 字典)。
 
@@ -468,7 +514,8 @@ class CatgirlCore:
         「主人半天没说话了，你想开口」这种指令，但历史里不该留这段指令，
         否则下次聊天她会以为自己被命令过。历史里记一句「（安静了一会儿）」就够。
         """
-        messages, usedMemories = self.build_messages(userText)
+        promptText, biliPayload = self.attach_bili(userText)
+        messages, usedMemories = self.build_messages(promptText)
         tail = TailBuffer()
         collected = []
 
@@ -526,6 +573,12 @@ class CatgirlCore:
             {
                 "reply": cleanReply,
                 "sing": singTitle,
+                "bili": None if not biliPayload else {
+                    "bvid": biliPayload.get("bvid"),
+                    "title": biliPayload.get("title"),
+                    "chars": biliPayload.get("chars", 0),
+                    "route": biliPayload.get("route"),
+                },
                 "session": self.session,
                 "mood": profile["mood"],
                 # 这条回复自带的情绪（可能为 None），调用方据此判断该不该发语音

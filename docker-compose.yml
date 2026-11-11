@@ -30,6 +30,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
+      CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
+      CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
       # 自建 GPT-SoVITS：跑在笔记本上，经 SSH 反向隧道映射到宿主机 9880
       CATGIRL_SOVITS_URL: ${CATGIRL_SOVITS_URL:-}
       CATGIRL_SOVITS_REF: ${CATGIRL_SOVITS_REF:-}
@@ -91,6 +94,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
+      CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
+      CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
       # 自建 GPT-SoVITS：跑在笔记本上，经 SSH 反向隧道映射到宿主机 9880
       CATGIRL_SOVITS_URL: ${CATGIRL_SOVITS_URL:-}
       CATGIRL_SOVITS_REF: ${CATGIRL_SOVITS_REF:-}
@@ -174,6 +180,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
+      CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
+      CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
       CATGIRL_QQBOT_ENABLED: "true"
       # q.qq.com 创建机器人后拿到的 AppID 和 AppSecret
       CATGIRL_QQBOT_APP_ID: ${CATGIRL_QQBOT_APP_ID:-}
@@ -234,6 +243,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
+      CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
+      CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
       CATGIRL_VISION_MODEL: ${CATGIRL_VISION_MODEL:-qwen3.7-plus}
       CATGIRL_VISION_BASE_URL: ${CATGIRL_VISION_BASE_URL:-}
       CATGIRL_VISION_API_KEY: ${CATGIRL_VISION_API_KEY:-}

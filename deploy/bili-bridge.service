@@ -1,0 +1,24 @@
+[Unit]
+Description=B站取稿桥（把 dsh-bili-humanism CLI 包成 HTTP，给猫娘容器用）
+Documentation=https://github.com/InariNGT-Ofiicial/dsh-bili-humanism
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=simple
+User=ubuntu
+WorkingDirectory=/home/ubuntu/catgirl/tools
+Environment=BILI_NODE=/home/ubuntu/opt/node24/bin/node
+Environment=BILI_PLUGIN_DIR=/home/ubuntu/bili-humanism
+Environment=BILI_DATA_DIR=/home/ubuntu/bili-humanism-data
+Environment=BILI_CRED_FILE=/home/ubuntu/bili-humanism-data/credential.json
+Environment=BILI_READ_TIMEOUT=180
+EnvironmentFile=-/home/ubuntu/bili-humanism-data/bridge.env
+ExecStart=/usr/bin/python3 /home/ubuntu/catgirl/tools/bili_bridge.py --port 8791
+Restart=always
+RestartSec=5
+# 4G 内存的小机器：给 node 子进程留点余量，别被 OOM 连带
+MemoryMax=900M
+
+[Install]
+WantedBy=multi-user.target

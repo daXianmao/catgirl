@@ -109,6 +109,10 @@ DEFAULTS = {
     "songClipSeconds": 40,
     "songClipMin": 25,
     "songClipMax": 40,
+    # B 站视频取稿：真正的取稿跑在宿主机的 bili-bridge 上（容器里没有 node）。
+    # 留空等于关掉这个能力，行为和以前完全一样。
+    "biliBridge": "http://host.docker.internal:8791",
+    "biliBridgeToken": "",
     "ttsProvider": "edge",
     "ttsVoice": "",
     "ttsModel": "",
@@ -294,6 +298,8 @@ def load_config(overrides=None):
         "CATGIRL_SONG_CLIP": "songClipSeconds",
         "CATGIRL_SONG_CLIP_MIN": "songClipMin",
         "CATGIRL_SONG_CLIP_MAX": "songClipMax",
+        "CATGIRL_BILI_BRIDGE": "biliBridge",
+        "CATGIRL_BILI_BRIDGE_TOKEN": "biliBridgeToken",
         "CATGIRL_TTS_PROVIDER": "ttsProvider",
         "CATGIRL_TTS_VOICE": "ttsVoice",
         "CATGIRL_TTS_MODEL": "ttsModel",
