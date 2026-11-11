@@ -109,6 +109,11 @@ DEFAULTS = {
     "songClipSeconds": 40,
     "songClipMin": 25,
     "songClipMax": 40,
+    # 每日日程：每晚给第二天排一整天，聊天时把「此刻在做什么」带进系统提示。
+    # scheduleHour 是几点生成明天，scheduleWorld 留空用内置的生活设定。
+    "scheduleEnabled": True,
+    "scheduleHour": 22,
+    "scheduleWorld": "",
     # B 站视频取稿：真正的取稿跑在宿主机的 bili-bridge 上（容器里没有 node）。
     # 留空等于关掉这个能力，行为和以前完全一样。
     "biliBridge": "http://host.docker.internal:8791",
@@ -298,6 +303,8 @@ def load_config(overrides=None):
         "CATGIRL_SONG_CLIP": "songClipSeconds",
         "CATGIRL_SONG_CLIP_MIN": "songClipMin",
         "CATGIRL_SONG_CLIP_MAX": "songClipMax",
+        "CATGIRL_SCHEDULE_HOUR": "scheduleHour",
+        "CATGIRL_SCHEDULE_WORLD": "scheduleWorld",
         "CATGIRL_BILI_BRIDGE": "biliBridge",
         "CATGIRL_BILI_BRIDGE_TOKEN": "biliBridgeToken",
         "CATGIRL_TTS_PROVIDER": "ttsProvider",
@@ -359,6 +366,7 @@ def load_config(overrides=None):
             cfg[key] = value
 
     cfg["disableThinking"] = _as_bool(_env("CATGIRL_DISABLE_THINKING", fileCfg.get("disableThinking")), True)
+    cfg["scheduleEnabled"] = _as_bool(_env("CATGIRL_SCHEDULE", fileCfg.get("scheduleEnabled")), True)
     cfg["ttsAuto"] = _as_bool(_env("CATGIRL_TTS_AUTO", fileCfg.get("ttsAuto")), False)
     cfg["qqEnabled"] = _as_bool(_env("CATGIRL_QQ_ENABLED", fileCfg.get("qqEnabled")), False)
     cfg["qqPrivate"] = _as_bool(_env("CATGIRL_QQ_PRIVATE", fileCfg.get("qqPrivate")), True)

@@ -13,6 +13,7 @@ from datetime import datetime, timedelta, timezone
 import bili
 from brain import Brain, BrainError
 from memory import MemoryStore
+from schedule import ScheduleKeeper
 from song import SongLibrary
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
@@ -174,6 +175,12 @@ class CatgirlCore:
         self.background = []
         self.turnsSinceSummary = 0
         self.gapText = "这是你们的第一次对话"
+        # 每日日程：借 kv 表存，每晚生成明天一整天，聊天时只注入「此刻」那几行。
+        # isBusy 用来让路——主人在说话时后台别去抢模型。
+        self.schedule = ScheduleKeeper(
+            cfg, self.store, self.brain, name=self.name, persona=self.persona,
+            isBusy=lambda: self._turnLock.locked(),
+        )
 
     # ------------------------------------------------------------ 初始化
     def _load_persona(self):
@@ -192,6 +199,8 @@ class CatgirlCore:
         lastSeen = self.store.get_kv_float("lastSeen", 0.0)
         self.gapText = "这是你们的第一次对话" if lastSeen <= 0 else f"上次对话在{human_time(lastSeen)}"
         self.store.set_kv("lastSeen", now)
+        # 日程定时器跟着进程走，重复 bootstrap 时它自己会忽略
+        self.schedule.startTicker()
         return self.profile()
 
     # ------------------------------------------------------------ 心情
@@ -268,6 +277,17 @@ class CatgirlCore:
             f"- 你们认识第 {knownDays} 天 ｜ 好感度 {int(affinity)}/100（{relation}）｜ 你此刻的心情：{moodText}",
             "",
         ]
+
+        # 她自己的日子。有就贴一段，没有就什么都不加——
+        # 日程是锦上添花，出任何问题都不能连累正常聊天。
+        try:
+            scheduleText = self.schedule.injectText()
+        except Exception as exc:
+            scheduleText = ""
+            log(f"日程注入失败：{exc!r}")
+        if scheduleText:
+            lines.append(scheduleText)
+            lines.append("")
 
         if memories:
             lines.append("## 长期记忆（按与当前话题的相关度排序，是「你想起来的」）")

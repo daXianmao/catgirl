@@ -30,6 +30,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 每日日程：每晚这个点给第二天排一整天，聊天时注入「此刻」
+      CATGIRL_SCHEDULE: ${CATGIRL_SCHEDULE:-1}
+      CATGIRL_SCHEDULE_HOUR: ${CATGIRL_SCHEDULE_HOUR:-22}
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
@@ -94,6 +97,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 每日日程：每晚这个点给第二天排一整天，聊天时注入「此刻」
+      CATGIRL_SCHEDULE: ${CATGIRL_SCHEDULE:-1}
+      CATGIRL_SCHEDULE_HOUR: ${CATGIRL_SCHEDULE_HOUR:-22}
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
@@ -180,6 +186,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 每日日程：每晚这个点给第二天排一整天，聊天时注入「此刻」
+      CATGIRL_SCHEDULE: ${CATGIRL_SCHEDULE:-1}
+      CATGIRL_SCHEDULE_HOUR: ${CATGIRL_SCHEDULE_HOUR:-22}
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
@@ -243,6 +252,9 @@ services:
       # 唱段长度随机区间（秒），每次在 [MIN, MAX] 里取，剪辑两端都落在换气口
       CATGIRL_SONG_CLIP_MIN: ${CATGIRL_SONG_CLIP_MIN:-25}
       CATGIRL_SONG_CLIP_MAX: ${CATGIRL_SONG_CLIP_MAX:-40}
+      # 每日日程：每晚这个点给第二天排一整天，聊天时注入「此刻」
+      CATGIRL_SCHEDULE: ${CATGIRL_SCHEDULE:-1}
+      CATGIRL_SCHEDULE_HOUR: ${CATGIRL_SCHEDULE_HOUR:-22}
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}

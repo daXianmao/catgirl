@@ -363,6 +363,20 @@ class MemoryStore:
             )
             self._conn.commit()
 
+    def delete_kv_before(self, prefix, cutoff):
+        """删掉 prefix 开头、后缀（日期串）早于 cutoff 的键。
+
+        日程一天一条 kv，不清就会一直长。日期是 YYYY-MM-DD，
+        字典序即时间序，直接比字符串就够。
+        """
+        with self._lock:
+            cur = self._conn.execute(
+                "DELETE FROM kv WHERE k LIKE ? AND substr(k, ?) < ?",
+                (prefix + "%", len(prefix) + 1, cutoff),
+            )
+            self._conn.commit()
+            return cur.rowcount
+
     def get_kv_float(self, key, default=0.0):
         raw = self.get_kv(key)
         try:
