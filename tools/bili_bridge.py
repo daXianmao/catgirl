@@ -36,12 +36,24 @@ CRED_FILE = os.environ.get("BILI_CRED_FILE", os.path.join(DATA_DIR, "credential.
 TOKEN = os.environ.get("BILI_BRIDGE_TOKEN", "")
 READ_TIMEOUT = int(os.environ.get("BILI_READ_TIMEOUT", "180"))
 MAX_TEXT = int(os.environ.get("BILI_MAX_TEXT", "8000"))
+# 两次取稿之间至少隔这么久。请求打太密，B 站会把字幕降级成别的视频的自动字幕。
+MIN_INTERVAL = float(os.environ.get("BILI_MIN_INTERVAL", "6"))
 
 # BV 号固定 12 位（BV + 10 位），只认这个形态，别的一律拒
 BV_RE = re.compile(r"^BV[0-9A-Za-z]{10}$")
 
 # node 一次只跑一个：4G 内存的机器经不起并发解码
 _readLock = threading.Lock()
+_lastReadAt = 0.0
+
+
+def _throttle():
+    """按最小间隔限速，调用方必须已经持有 _readLock。"""
+    global _lastReadAt
+    wait = MIN_INTERVAL - (time.time() - _lastReadAt)
+    if wait > 0:
+        time.sleep(wait)
+    _lastReadAt = time.time()
 
 
 def has_credential():
@@ -71,6 +83,7 @@ def run_read(bv):
     args = [NODE_BIN, "bin/cli.mjs", "read", bv]
     started = time.time()
     with _readLock:
+        _throttle()
         try:
             proc = subprocess.run(
                 args, cwd=PLUGIN_DIR, env=env, timeout=READ_TIMEOUT,
@@ -118,6 +131,8 @@ def run_read(bv):
         "route": result.get("route") or "none",
         "coverage": coverage.get("state") or "",
         "attempts": result.get("attempts") or [],
+        # 非空表示只拿到平台自动字幕，内容可能与视频对不上，上层要降权
+        "degraded": result.get("degraded") or "",
         "elapsed": round(time.time() - started, 1),
     }
 

@@ -494,10 +494,13 @@ class CatgirlCore:
             )
 
         material = bili.as_context(payload)
+        degraded = payload.get("degraded") or ""
         log(f"看视频 {bv}：《{payload.get('title')}》 {payload.get('chars', 0)} 字"
-            f"（{payload.get('route')}，{payload.get('elapsed')}s）")
-        # 看过的视频留一条记忆，以后她自己能想起来
-        if payload.get("title"):
+            f"（{payload.get('route')}，{payload.get('elapsed')}s）"
+            + (f" [降级:{degraded}]" if degraded else ""))
+        # 看过的视频留一条记忆，以后她自己能想起来。
+        # 降级字幕可能整段是别的视频的内容，不能写进长期记忆，否则她会一直记错。
+        if payload.get("title") and not degraded:
             try:
                 self.add_memory(
                     f"看过B站视频《{payload['title']}》，作者{payload.get('author') or '未知'}",
