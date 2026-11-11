@@ -178,7 +178,12 @@ class Brain:
         """
         if not self.visionModel or not dataUri:
             return ""
-        prompt = prompt or "用一句中文描述这张图片，30 字以内，只说看到的内容，不要客套。"
+        # 描述要够细：主人常发「换上这件」的衣服图，只说「一个女生」等于没说。
+        # 60 字上限是给衣服留空间（颜色/款式/领口/长短），多了她也用不上。
+        prompt = prompt or (
+            "用一两句中文描述这张图片，60 字以内，只说看到的内容，不要客套。"
+            "如果画面里有衣服，写清楚颜色、款式、领口和长短。"
+        )
         payload = {
             "model": self.visionModel,
             "messages": [{
@@ -188,7 +193,7 @@ class Brain:
                     {"type": "image_url", "image_url": {"url": dataUri}},
                 ],
             }],
-            "max_tokens": 160,
+            "max_tokens": 240,
             "temperature": 0.2,
             "stream": False,
         }

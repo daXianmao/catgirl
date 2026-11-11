@@ -36,7 +36,7 @@ BARE_DRAW = re.compile(r"<draw\s*[^>]*/>", re.I)
 ANY_DRAW = re.compile(r"<draw(?:\s[^>]*)?>.*?</draw>|<draw\s*[^>]*/>", re.S | re.I)
 
 DEFAULT_LOOK = (
-    "洛天依，17 岁少女，浅紫灰色长发，齐刘海，两侧垂着长长的发束直至腰际，"
+    "洛天依，浅紫灰色长发，齐刘海，两侧垂着长长的发束直至腰际，"
     "发间别着蓝色蝴蝶结和白色小花发饰，翠绿色大眼睛，皮肤白皙，脸型小巧，"
     "笑起来嘴角微微上扬"
 )
@@ -52,6 +52,20 @@ ANIME_LOCK = (
     "整张图必须是 2D 二次元动漫插画（手绘动画质感），"
     "不要照片质感，不要 3D 渲染，不要 BJD 玩偶感，不要写实皮肤细节"
 )
+
+# 描述里出现这些词，说明是他临时指定穿什么：这时候不能再拿参考图的白裙压回去，
+# 否则「换上这件」永远换不掉。宁可多认几个词，也不要每个字都写全的语义分析。
+OUTFIT_WORDS = (
+    "穿", "裙", "衫", "外套", "卫衣", "睡衣", "睡裙", "吊带", "礼服", "婚纱", "泳装",
+    "泳衣", "制服", "校服", "汉服", "和服", "毛衣", "衬衫", "短裤", "长裤", "牛仔",
+    "袜", "鞋", "靴", "帽", "围巾", "披风", "袍", "背心", "上衣", "这套", "那件", "这件",
+)
+
+
+def wantsOutfit(brief):
+    """描述里是不是在指定服装。"""
+    return any(word in (brief or "") for word in OUTFIT_WORDS)
+
 
 
 def log(text):
@@ -88,6 +102,8 @@ class ImageStudio:
         self.model = (cfg.get("imageModel") or "wan2.5-t2i-preview").strip()
         self.size = (cfg.get("imageSize") or "1280*1280").strip()
         self.cooldown = int(cfg.get("imageCooldown") or 900)
+        # 冷却只剩几十秒时别报错让人干等下一次：等一等直接画，主人根本分不出来
+        self.grace = int(cfg.get("imageGrace") or 90)
         self.refDir = cfg.get("imageRefDir") or "/data/image/refs"
         self.outDir = cfg.get("imageOutDir") or "/data/image/out"
         self.keep = int(cfg.get("imageKeep") or 120)
@@ -184,8 +200,9 @@ class ImageStudio:
         最后明确要求换掉背景、姿势、表情和构图。不写这一段，模型会把
         参考图的灰底正面站姿整个搬过来，每次自拍都是同一张。
 
-        穿什么分两种：日程里排了 outfit 就按日程换掉；没排就保留参考图
-        那套白色小礼服——否则模型会随手编一套，她自己都不认识。
+        穿什么按优先级来：他这次点名要穿的那套 > 日程里排的 outfit > 参考图的白裙。
+        最坑的是第一条：以前只认日程，「换上这件」永远被白裙压回去，她自己都以为
+        不会换衣服。没指定才保留白裙——否则模型会随手编一套，她自己都不认识。
         """
         brief = (brief or "").strip()
         scene = self._scene()
@@ -204,7 +221,13 @@ class ImageStudio:
 
         seg = self._segment() or {}
         outfit = (seg.get("outfit") or "").strip()
-        if outfit:
+        if brief and wantsOutfit(brief):
+            change = (
+                "服装按【画面】里写的那套换掉，连发型和配饰也按描述来，"
+                "背景、光影、构图、视角、姿势和表情也全部换成新的，"
+                "不要沿用图1里的纯灰背景和正面站姿。"
+            )
+        elif outfit:
             change = (
                 "服装按【此刻】里写的那套换掉，背景、光影、构图、视角、姿势和表情"
                 "也全部换成新的，不要沿用图1里的纯灰背景和正面站姿。"
@@ -389,7 +412,12 @@ class ImageStudio:
             raise ImageError("没有可用的生图密钥")
         left = self.cooldownLeft()
         if left > 0 and not force:
-            raise ImageError(f"冷却中，还有 {left} 秒")
+            if left <= self.grace:
+                # 剩几十秒就等，别为这点时间把「换上这件」直接拒了
+                log(f"冷却只剩 {left} 秒，等一等再画")
+                time.sleep(left + 1)
+            else:
+                raise ImageError(f"冷却中，还有 {left} 秒")
 
         refs = self._refs()
         prompt = self.buildPrompt(brief, bool(refs))
