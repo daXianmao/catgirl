@@ -106,6 +106,9 @@ class ImageStudio:
         self.grace = int(cfg.get("imageGrace") or 90)
         self.refDir = cfg.get("imageRefDir") or "/data/image/refs"
         self.outDir = cfg.get("imageOutDir") or "/data/image/out"
+        # 主人发来的图落盘在这儿，等他说「换上这件」时当第二张参考
+        self.inboxDir = cfg.get("imageInboxDir") or "/data/image/inbox"
+        self.inboxKeep = int(cfg.get("imageInboxKeep") or 60)
         self.keep = int(cfg.get("imageKeep") or 120)
         self.appearance = (cfg.get("imageLook") or DEFAULT_LOOK).strip()
         self.style = (cfg.get("imageStyle") or DEFAULT_STYLE).strip()
@@ -135,8 +138,16 @@ class ImageStudio:
                 pass
 
     # ------------------------------------------------------------ 素材
+    @staticmethod
+    def _uri(path):
+        """本地图片转 data URI。容器里没有公网地址，只能 base64 内嵌。"""
+        with open(path, "rb") as handle:
+            raw = handle.read()
+        mime = "image/png" if path.lower().endswith(".png") else "image/jpeg"
+        return f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
+
     def _refs(self, limit=1):
-        """参考图转 data URI。容器里没有公网地址，只能 base64 内嵌。
+        """参考图转 data URI。
 
         只取一张：编辑模型的多图语义是「把这几张融在一起」，
         塞多张不同角度反而会换来换去，一张正脸最稳。
@@ -155,16 +166,53 @@ class ImageStudio:
                 if os.path.getsize(path) > 6 * 1024 * 1024:
                     log(f"参考图 {name} 超过 6MB，跳过")
                     continue
-                with open(path, "rb") as handle:
-                    raw = handle.read()
+                uris.append(self._uri(path))
             except OSError as exc:
                 log(f"读参考图 {name} 失败：{exc}")
                 continue
-            mime = "image/png" if name.lower().endswith(".png") else "image/jpeg"
-            uris.append(f"data:{mime};base64," + base64.b64encode(raw).decode("ascii"))
             if len(uris) >= limit:
                 break
         return uris
+
+    # ------------------------------------------------------------ 来图
+    def saveInbox(self, raw, ext=".jpg"):
+        """主人的来图落盘，留给他「换上这件」时当参考。失败返回空串。"""
+        if not raw:
+            return ""
+        try:
+            os.makedirs(self.inboxDir, exist_ok=True)
+            stamp = datetime.now(LOCAL_TZ).strftime("in-%Y%m%d-%H%M%S")
+            path = os.path.join(self.inboxDir, f"{stamp}-{int(time.time() * 1000) % 1000:03d}{ext}")
+            with open(path, "wb") as handle:
+                handle.write(raw)
+        except OSError as exc:
+            log(f"存来图失败：{exc}")
+            return ""
+        self._pruneInbox()
+        return path
+
+    def _pruneInbox(self):
+        """来图只留最近几十张，别把 2G 内存的小机器塞满。"""
+        if self.inboxKeep <= 0:
+            return
+        files = []
+        try:
+            for name in os.listdir(self.inboxDir):
+                full = os.path.join(self.inboxDir, name)
+                try:
+                    files.append((os.path.getmtime(full), full))
+                except OSError:
+                    pass
+        except OSError:
+            return
+        if len(files) <= self.inboxKeep:
+            return
+        files.sort()
+        for _mtime, full in files[: len(files) - self.inboxKeep]:
+            try:
+                os.remove(full)
+            except OSError:
+                pass
 
     def _segment(self):
         """当前时间段。拿不到返回 None。"""
@@ -193,16 +241,16 @@ class ImageStudio:
         return "，".join(parts)
 
     # ------------------------------------------------------------ 提示词
-    def buildPrompt(self, brief, hasRef=False):
+    def buildPrompt(self, brief, hasRef=False, hasGarment=False):
         """拼生图提示词。
 
         有参考图时写的是「编辑指令」：先钉死长相不许变，再描述新场景，
         最后明确要求换掉背景、姿势、表情和构图。不写这一段，模型会把
         参考图的灰底正面站姿整个搬过来，每次自拍都是同一张。
 
-        穿什么按优先级来：他这次点名要穿的那套 > 日程里排的 outfit > 参考图的白裙。
-        最坑的是第一条：以前只认日程，「换上这件」永远被白裙压回去，她自己都以为
-        不会换衣服。没指定才保留白裙——否则模型会随手编一套，她自己都不认识。
+        穿什么按优先级来：他发来的那张衣服图 > 文字里点名的那套 >
+        日程里排的 outfit > 参考图的白裙。文字说不清蕾丝花边这种细节，
+        所以有图就先看图——这是「换上这件」最贴的做法。
         """
         brief = (brief or "").strip()
         scene = self._scene()
@@ -221,7 +269,13 @@ class ImageStudio:
 
         seg = self._segment() or {}
         outfit = (seg.get("outfit") or "").strip()
-        if brief and wantsOutfit(brief):
+        if hasGarment:
+            change = (
+                "服装完全照图2来：颜色、款式、领口、袖口、蕾丝花边、纽扣、长短都按图2；"
+                "图2里的人物、姿势和背景一概不要。背景、光影、构图、视角、姿势和表情"
+                "换成新的，不要沿用图1里的纯灰背景和正面站姿。"
+            )
+        elif brief and wantsOutfit(brief):
             change = (
                 "服装按【画面】里写的那套换掉，连发型和配饰也按描述来，"
                 "背景、光影、构图、视角、姿势和表情也全部换成新的，"
@@ -244,8 +298,13 @@ class ImageStudio:
             "眼睛形状和瞳色、刘海分法、发色、以及发间的蓝色蝴蝶结和白色小花发饰，"
             "都要和图1是同一个人。她的头发永远是浅紫灰色、眼睛永远是翠绿色——"
             "环境光再暖（夕阳、台灯、霓虹）也只加一层光晕，不许把发色染成橘色金色。",
-            "把她画到下面这个新场景里：",
         ]
+        if hasGarment:
+            lines.append(
+                "图2是他发来的服装参考。只取图2的衣服穿到图1的人物身上，"
+                "长相、发型、发饰、发色、瞳色仍然全部按图1。"
+            )
+        lines.append("把她画到下面这个新场景里：")
         if brief:
             lines.append(f"【画面】{brief}")
         else:
@@ -404,8 +463,12 @@ class ImageStudio:
             except OSError:
                 pass
 
-    def draw(self, brief, force=False):
-        """画一张，返回本地路径。失败抛 ImageError，调用方决定怎么说。"""
+    def draw(self, brief, force=False, garmentPath=""):
+        """画一张，返回本地路径。失败抛 ImageError，调用方决定怎么说。
+
+        garmentPath：主人发来的衣服图。给了就当第二张参考，衣服照它穿——
+        文字转述蕾丝花边这种细节永远不准，直接上图才靠谱。
+        """
         if not self.enabled:
             raise ImageError("生图功能没开")
         if not self.apiKey:
@@ -420,15 +483,30 @@ class ImageStudio:
                 raise ImageError(f"冷却中，还有 {left} 秒")
 
         refs = self._refs()
-        prompt = self.buildPrompt(brief, bool(refs))
+        garment = ""
+        if garmentPath:
+            try:
+                if os.path.getsize(garmentPath) > 6 * 1024 * 1024:
+                    log("来图超过 6MB，当参考跳过")
+                else:
+                    garment = self._uri(garmentPath)
+            except OSError as exc:
+                log(f"读来图失败：{exc}")
+        if garment and refs:
+            images = refs + [garment]
+        else:
+            images = refs
+            garment = ""
+        prompt = self.buildPrompt(brief, bool(refs), bool(garment))
         started = time.time()
-        taskId = self._submit(prompt, refs)
+        taskId = self._submit(prompt, images)
         url = self._wait(taskId)
         path = self._download(url)
         self.markDrawn()
         self._prune()
         log(
-            f"出图 {os.path.basename(path)}｜{len(refs)} 张参考｜"
+            f"出图 {os.path.basename(path)}｜{len(images)} 张参考"
+            f"{'（含来图换装）' if garment else ''}｜"
             f"{time.time() - started:.1f}s｜{brief[:24]}"
         )
         return path

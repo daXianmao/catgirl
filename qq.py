@@ -33,6 +33,8 @@ except ImportError:  # 老版本兜底
 
 import websockets
 
+import image as imageMod
+
 # websockets 15+ 会自动读 HTTP_PROXY/HTTPS_PROXY，连本机协议端会被代理拦掉，
 # 所以显式传 proxy=None；老版本没有这个参数，只能按版本判断
 _WS_MAJOR = int(websockets.__version__.split(".")[0])
@@ -303,6 +305,8 @@ class QQSession:
         self.voiceMuteUntil = 0.0  # 对方喊停后，到这个时间点前都不发语音
         self.lastSpokeUp = 0.0     # 上次主动搭话的时间
         self.speakUpStreak = 0     # 连续几次主动搭话对方没接话（用来退避）
+        # 他最近发来的一张图（路径, 时间）：多半是「换上这件」的衣服参考
+        self.lastPhoto = ("", 0.0)
 
 
 class QQBot:
@@ -404,31 +408,45 @@ class QQBot:
         return data if len(data) <= limit else b""
 
     async def read_image(self, session, url):
-        """下载图片交给多模态模型，返回一句描述；失败返回空串，不影响主流程。"""
+        """下载图片交给多模态模型，返回（一句描述, 落盘路径）；失败返回空串。
+
+        落盘是为了后面「换上这件」能拿它当第二参考图——文字转述衣服细节永远
+        不如直接看图。跑在 /data 卷里，重启也不会丢。
+        """
         brain = getattr(session.core, "brain", None)
         if not brain or not getattr(brain, "visionModel", ""):
-            return ""
+            return "", ""
         try:
             raw = await asyncio.to_thread(self._fetch_image, url)
         except Exception as exc:
             log(f"图片下载失败：{exc}")
-            return ""
+            return "", ""
         if not raw:
-            return ""
+            return "", ""
         # 按文件头猜 MIME：模型对 data URI 里声明的类型比较敏感
         mime = "image/jpeg"
+        ext = ".jpg"
         if raw[:8] == b"\x89PNG\r\n\x1a\n":
             mime = "image/png"
+            ext = ".png"
         elif raw[:6] in (b"GIF87a", b"GIF89a"):
             mime = "image/gif"
+            ext = ".gif"
         elif raw[:4] == b"RIFF" and raw[8:12] == b"WEBP":
             mime = "image/webp"
+            ext = ".webp"
+        # GIF 万相不收，落盘时按 jpg 存也没用，干脆不存
+        path = ""
+        studio = getattr(session.core, "image", None)
+        if studio and ext != ".gif":
+            path = await asyncio.to_thread(studio.saveInbox, raw, ext)
         dataUri = f"data:{mime};base64," + base64.b64encode(raw).decode("ascii")
         try:
-            return (await asyncio.to_thread(brain.describeImage, dataUri) or "").strip()
+            desc = (await asyncio.to_thread(brain.describeImage, dataUri) or "").strip()
         except Exception as exc:
             log(f"图片识别失败：{exc}")
-            return ""
+            desc = ""
+        return desc, path
 
     async def read_voice(self, session, data):
         """把一条 QQ 语音转成文字：get_record 拿 wav base64 → qwen3-asr 转写。
@@ -604,12 +622,30 @@ class QQBot:
         log(f"发图：{os.path.basename(path)}（{len(raw) // 1024}KB）")
         return True
 
-    async def draw_image(self, session, brief):
+    def garmentPhoto(self, session, userText, drawBrief, maxAge=900):
+        """要换装时，把主人最近发来的那张图当服装参考。返回路径或空串。
+
+        只在两种条件下用，避免把他随手发的自拍当衣服：
+          1. 图是最近 15 分钟内的（他说「换上这件」一般紧跟图片）
+          2. 他说的话或画图描述里提到了穿什么
+        """
+        path, stamp = getattr(session, "lastPhoto", ("", 0.0))
+        if not path or not os.path.isfile(path):
+            return ""
+        if time.time() - stamp > maxAge:
+            return ""
+        if imageMod.wantsOutfit(userText) or imageMod.wantsOutfit(drawBrief or ""):
+            return path
+        return ""
+
+    async def draw_image(self, session, brief, garment=""):
         """出一张图。十几秒的活丢线程池，别把事件循环堵住。"""
         if not session.core.image.ready():
             return None
         try:
-            return await asyncio.to_thread(session.core.image.draw, brief)
+            return await asyncio.to_thread(
+                session.core.image.draw, brief, force=False, garmentPath=garment
+            )
         except Exception as exc:
             log(f"画图失败：{exc}")
             return None
@@ -971,9 +1007,12 @@ class QQBot:
             if limit > 0 and (kind == "private" or mentioned):
                 descs = []
                 for url in images[:limit]:
-                    desc = await self.read_image(session, url)
+                    desc, photoPath = await self.read_image(session, url)
                     if desc:
                         descs.append(desc)
+                    if photoPath:
+                        # 记在会话上：他常常先发衣服图、过一会儿才说「换上这件」
+                        session.lastPhoto = (photoPath, time.time())
                 if descs:
                     rest = text.replace("［图片］", "").strip()
                     text = "［图片内容：" + "；".join(descs) + "］" + rest
@@ -1021,7 +1060,10 @@ class QQBot:
                 if not reply.strip():
                     reply = "等我一下，画给你看"
                 await self.send(kind, chatId, reply, session)
-                imagePath = await self.draw_image(session, drawBrief)
+                garment = self.garmentPhoto(session, text, drawBrief)
+                if garment:
+                    log(f"换装：拿主人发来的图当服装参考（{os.path.basename(garment)}）")
+                imagePath = await self.draw_image(session, drawBrief, garment)
                 if imagePath and await self.send_photo(kind, chatId, imagePath):
                     if emojiName:
                         await self.send_image(kind, chatId, emojiName)
