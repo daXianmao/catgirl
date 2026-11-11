@@ -36,14 +36,21 @@ BARE_DRAW = re.compile(r"<draw\s*[^>]*/>", re.I)
 ANY_DRAW = re.compile(r"<draw(?:\s[^>]*)?>.*?</draw>|<draw\s*[^>]*/>", re.S | re.I)
 
 DEFAULT_LOOK = (
-    "17 岁少女，灰白色头发扎成低双马尾，发梢是低饱和的青绿色渐变，"
-    "翠绿色眼睛，皮肤白皙，五官清秀，气质温柔安静"
+    "洛天依，17 岁少女，浅紫灰色长发，齐刘海，两侧垂着长长的发束直至腰际，"
+    "发间别着蓝色蝴蝶结和白色小花发饰，翠绿色大眼睛，皮肤白皙，脸型小巧，"
+    "笑起来嘴角微微上扬"
 )
 
 # 写死风格而不是交给模型自由发挥：她每天几十条消息，风格飘了就像换了个人
 DEFAULT_STYLE = (
-    "真实感照片，日系人像摄影，柔光，浅景深，肤色自然有质感，"
-    "日常感，不过度磨皮，不摆拍"
+    "日系二次元动漫画风，干净清晰的线稿，赛璐璐平涂配柔和渐变阴影，"
+    "配色通透鲜艳，大眼睛带高光，TV 动画质感，浅色干净背景"
+)
+
+# 只靠风格词管不住模型：它一看到写实的参考图就往照片方向走，必须明着禁
+ANIME_LOCK = (
+    "整张图必须是 2D 二次元动漫插画（手绘动画质感），"
+    "不要照片质感，不要 3D 渲染，不要 BJD 玩偶感，不要写实皮肤细节"
 )
 
 
@@ -143,14 +150,18 @@ class ImageStudio:
                 break
         return uris
 
+    def _segment(self):
+        """当前时间段。拿不到返回 None。"""
+        if not self.schedule:
+            return None
+        try:
+            return self.schedule.current() or None
+        except Exception:
+            return None
+
     def _scene(self):
         """此刻在做什么、在哪、穿什么。拿不到就返回空串，纯文字出图。"""
-        if not self.schedule:
-            return ""
-        try:
-            seg = self.schedule.current()
-        except Exception:
-            return ""
+        seg = self._segment()
         if not seg:
             return ""
         doing = (seg.get("doing") or "").strip()
@@ -172,6 +183,9 @@ class ImageStudio:
         有参考图时写的是「编辑指令」：先钉死长相不许变，再描述新场景，
         最后明确要求换掉背景、姿势、表情和构图。不写这一段，模型会把
         参考图的灰底正面站姿整个搬过来，每次自拍都是同一张。
+
+        穿什么分两种：日程里排了 outfit 就按日程换掉；没排就保留参考图
+        那套白色小礼服——否则模型会随手编一套，她自己都不认识。
         """
         brief = (brief or "").strip()
         scene = self._scene()
@@ -184,12 +198,29 @@ class ImageStudio:
             if scene:
                 lines.append(f"【此刻】{scene}")
             lines.append(f"【风格】{style}")
-            lines.append("要求：画一张全新的画面，构图、视角、景别、姿势、动作、表情都按上面的文字安排。")
+            lines.append(f"【硬性要求】{ANIME_LOCK}")
+            lines.append("画一张全新的画面，构图、视角、景别、姿势、动作、表情都按上面的文字安排。")
             return "\n".join(lines)
 
+        seg = self._segment() or {}
+        outfit = (seg.get("outfit") or "").strip()
+        if outfit:
+            change = (
+                "服装按【此刻】里写的那套换掉，背景、光影、构图、视角、姿势和表情"
+                "也全部换成新的，不要沿用图1里的纯灰背景和正面站姿。"
+            )
+        else:
+            change = (
+                "保留图1里这套穿搭：白色露肩连衣裙，泡泡短袖，黑色蝴蝶结领结，"
+                "白色荷叶边配金色刺绣的短裙摆。只换背景、光影、构图、视角、姿势和表情，"
+                "不要沿用图1里的纯灰背景和正面站姿。"
+            )
+
         lines = [
-            "保持图1中这个少女的长相完全不变：脸型、五官、眼睛、发型发色、瞳孔颜色、体型气质"
-            "都要和图1是同一个人。",
+            "图1是同一个人物的二次元形象设定。保持她的长相完全不变：脸型、五官、"
+            "眼睛形状和瞳色、刘海分法、发色、以及发间的蓝色蝴蝶结和白色小花发饰，"
+            "都要和图1是同一个人。她的头发永远是浅紫灰色、眼睛永远是翠绿色——"
+            "环境光再暖（夕阳、台灯、霓虹）也只加一层光晕，不许把发色染成橘色金色。",
             "把她画到下面这个新场景里：",
         ]
         if brief:
@@ -199,10 +230,11 @@ class ImageStudio:
         if scene:
             lines.append(f"【此刻】{scene}")
         lines.append(f"【风格】{style}")
-        lines.append(
-            "要求：服装、背景、光影、构图、视角、姿势和表情全部换成新的，"
-            "不要沿用图1里的纯色背景、正面站姿和平静表情。"
-        )
+        lines.append(f"【硬性要求】{ANIME_LOCK}")
+        lines.append(change)
+        # 首尾各钉一次：模型对最后一行最敏感，「夕阳把头发照成橘色」这类
+        # 描述真能把发色带跑偏，末尾再提醒一句压住它
+        lines.append("提醒：她的发色始终是浅紫灰色，瞳色始终是翠绿色，任何光线下都不变。")
         return "\n".join(lines)
 
     # ------------------------------------------------------------ 出图
