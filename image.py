@@ -67,6 +67,36 @@ def wantsOutfit(brief):
     return any(word in (brief or "") for word in OUTFIT_WORDS)
 
 
+# 用来在画面描述里找服装片段。比 OUTFIT_WORDS 收得紧一些：像「这件」「那件」
+# 这种指代词不算，否则「拿着那件毛衣」会被整句剪掉。
+OUTFIT_NOUN = re.compile(
+    r"卫衣|毛衣|衬衫|针织|开衫|外套|大衣|风衣|羽绒|夹克|马甲|背心|"
+    r"连衣裙|裙子|短裙|长裙|吊带|礼服|睡裙|睡衣|泳装|泳衣|制服|校服|汉服|和服|"
+    r"围巾|牛仔|短裤|长裤|裤子|袜子|靴|鞋子|高跟鞋|帽子"
+)
+
+
+def stripOutfit(brief):
+    """把画面描述里的服装片段剪掉。
+
+    主人发来衣服图时，她常顺手把日程里那身写进描述（「蓝色卫衣和青绿围巾」），
+    模型看到这么具体的文字就跟着文字画，图2 白给了。15:51 那次实测就是这样：
+    日志写着「2 张参考（含来图换装）」，画出来还是卫衣加围巾。
+    所以有服装参考图时，先把这些片段剪掉，只留场景/动作/姿势/光线。
+    """
+    if not brief:
+        return ""
+    parts = re.split(r"([，,。；;])", brief)
+    kept = [part for part in parts if not OUTFIT_NOUN.search(part)]
+    text = "".join(kept).strip(" ，,。；;、")
+    if not text:
+        return ""
+    # 剪完可能剩个孤零零的「穿着」，或者「和」挂在句尾，收拾一下
+    text = re.sub(r"(穿着|身穿|穿了|换上|套着|披着)$", "", text).strip(" ，,、")
+    text = re.sub(r"[，,]{2,}", "，", text)
+    return text or ""
+
+
 
 def log(text):
     stamp = datetime.now(LOCAL_TZ).strftime("%H:%M:%S")
@@ -253,7 +283,13 @@ class ImageStudio:
         所以有图就先看图——这是「换上这件」最贴的做法。
         """
         brief = (brief or "").strip()
+        # 有服装参考图时，描述里的衣服会和图2 打架（15:51 实测画成了卫衣围巾），先剪掉
+        if hasGarment:
+            brief = stripOutfit(brief)
         scene = self._scene()
+        if hasGarment:
+            # 日程里的 outfit 同理，也会把卫衣围巾塞进提示词
+            scene = stripOutfit(scene)
         style = self.style
 
         if not hasRef:
@@ -271,9 +307,10 @@ class ImageStudio:
         outfit = (seg.get("outfit") or "").strip()
         if hasGarment:
             change = (
-                "服装完全照图2来：颜色、款式、领口、袖口、蕾丝花边、纽扣、长短都按图2；"
-                "图2里的人物、姿势和背景一概不要。背景、光影、构图、视角、姿势和表情"
-                "换成新的，不要沿用图1里的纯灰背景和正面站姿。"
+                "再确认一次：她身上穿的是图2 那件衣服，不是【画面】或【此刻】里提到的任何衣服。"
+                "款式、剪裁、领口高低、肩带、袖长、下摆长度全部和图2 一模一样，"
+                "不要自作主张加领子、加长袖、加外套、加内搭，也不要把它换成别的同类衣服。"
+                "背景、光影、构图、视角、姿势和表情换成新的，不要沿用图1里的纯灰背景和正面站姿。"
             )
         elif brief and wantsOutfit(brief):
             change = (
@@ -301,14 +338,24 @@ class ImageStudio:
         ]
         if hasGarment:
             lines.append(
-                "图2是他发来的服装参考。只取图2的衣服穿到图1的人物身上，"
-                "长相、发型、发饰、发色、瞳色仍然全部按图1。"
+                "图2是他发来的服装参考，是这张图里**唯一有效**的服装要求。"
+                "衣服的颜色、款式、领口、袖口、蕾丝花边、纽扣、长短全部照图2，"
+                "图2里的人物长相、姿势和背景一概不要。"
             )
         lines.append("把她画到下面这个新场景里：")
         if brief:
             lines.append(f"【画面】{brief}")
+            if hasGarment:
+                lines.append(
+                    "（【画面】只用来定场景、动作、姿势、景别和光线。"
+                    "这段文字里如果提到任何衣服，一律作废，服装只看图2。）"
+                )
         else:
-            lines.append("【画面】随手拍一张她此刻的样子")
+            lines.append(
+                "【画面】穿着图2那件衣服，随手拍一张她此刻的样子"
+                if hasGarment
+                else "【画面】随手拍一张她此刻的样子"
+            )
         if scene:
             lines.append(f"【此刻】{scene}")
         lines.append(f"【风格】{style}")
@@ -317,6 +364,8 @@ class ImageStudio:
         # 首尾各钉一次：模型对最后一行最敏感，「夕阳把头发照成橘色」这类
         # 描述真能把发色带跑偏，末尾再提醒一句压住它
         lines.append("提醒：她的发色始终是浅紫灰色，瞳色始终是翠绿色，任何光线下都不变。")
+        if hasGarment:
+            lines.append("提醒：她身上穿的是图2 那件衣服，不是你文字里描述的任何衣服。")
         return "\n".join(lines)
 
     # ------------------------------------------------------------ 出图
