@@ -40,7 +40,7 @@ _SUPPORTS_PROXY_ARG = _WS_MAJOR >= 15
 
 from brain import BrainError
 from config import describe, load_config
-from core import SING_TAG, CatgirlCore
+from core import ANY_DRAW_TAG, SING_TAG, CatgirlCore
 from song import SongError, SongLibrary
 from tts import TTS, TTSError
 
@@ -491,7 +491,8 @@ class QQBot:
             return "（脑袋突然卡住了…等下再说好不好）", meta
 
         self.stats["回复"] += 1
-        return forQQ(SING_TAG.sub("", text)), meta
+        # 这里拿到的是原始流，标签还在；画图的标签也要剥掉，不能当话发出去
+        return forQQ(ANY_DRAW_TAG.sub("", SING_TAG.sub("", text))), meta
 
     # ------------------------------------------------------------ 发送
     async def call(self, action, params, timeout=15):
@@ -577,6 +578,41 @@ class QQBot:
             return False
         log(f"发表情：{name}")
         return True
+
+    async def send_photo(self, kind, chatId, path):
+        """发一张刚生成的图。同样走 base64——协议端在另一台机器上，
+        容器里的路径它读不到。"""
+        try:
+            with open(path, "rb") as handle:
+                raw = handle.read()
+        except OSError as exc:
+            log(f"读生成图失败：{exc}")
+            return False
+        # 太大的图协议端会拒，2M 内存的机器也不该把几十兆塞进 WS 帧
+        if len(raw) > 5 * 1024 * 1024:
+            log(f"生成的图 {len(raw) // 1024}KB 超过 5MB，不发了")
+            return False
+        action = "send_group_msg" if kind == "group" else "send_private_msg"
+        key = "group_id" if kind == "group" else "user_id"
+        uri = "base64://" + base64.b64encode(raw).decode("ascii")
+        result = await self.call(
+            action, {key: chatId, "message": [{"type": "image", "data": {"file": uri}}]}
+        )
+        if result and result.get("status") in ("failed", "error"):
+            log(f"发图失败：{str(result)[:140]}")
+            return False
+        log(f"发图：{os.path.basename(path)}（{len(raw) // 1024}KB）")
+        return True
+
+    async def draw_image(self, session, brief):
+        """出一张图。十几秒的活丢线程池，别把事件循环堵住。"""
+        if not session.core.image.ready():
+            return None
+        try:
+            return await asyncio.to_thread(session.core.image.draw, brief)
+        except Exception as exc:
+            log(f"画图失败：{exc}")
+            return None
 
     def voice_decision(self, kind, rawText, reply, meta, session, hasVoiceMsg=False):
         """这一轮要不要额外发一条语音？返回 (要发, 原因)。
@@ -973,12 +1009,26 @@ class QQBot:
             reply, meta = await self.reply_text(session, userText)
             reply, emojiName = self.take_emoji(reply, session)
             singTitle = (meta or {}).get("sing")
-            if not reply.strip() and not singTitle:
+            drawBrief = (meta or {}).get("draw")
+            if not reply.strip() and not singTitle and drawBrief is None:
                 # 出口清洗把整条回复清空了（模型只给了动作描写或只发了表情），
                 # 空串会被 send() 当没有内容静默丢掉，主人这边就是「没反应」。
-                # 要唱歌时不能补这句，否则主人会先听到「……嗯。」再接一段歌。
+                # 要唱歌/要画图时不能补这句，否则会多一句莫名其妙的「……嗯。」。
                 log("模型没给出可发的台词，用兜底一句顶上")
                 reply = "……嗯。"
+            # 画图：图要五十来秒才出来，先把这句话发出去，别让他干等
+            if drawBrief is not None and not singTitle:
+                if not reply.strip():
+                    reply = "等我一下，画给你看"
+                await self.send(kind, chatId, reply, session)
+                imagePath = await self.draw_image(session, drawBrief)
+                if imagePath and await self.send_photo(kind, chatId, imagePath):
+                    if emojiName:
+                        await self.send_image(kind, chatId, emojiName)
+                    return
+                log("图没画成，已经跟他说过了")
+                await self.send(kind, chatId, "唔，这张没画出来，等下再试一次", session)
+                return
             # 唱歌优先于念话：模型写了 <sing title="..."/> 就先发唱段，
             # 文字只作陪衬，绝不能再把歌词念一遍
             if singTitle:

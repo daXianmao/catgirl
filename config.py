@@ -118,6 +118,19 @@ DEFAULTS = {
     # 留空等于关掉这个能力，行为和以前完全一样。
     "biliBridge": "http://host.docker.internal:8791",
     "biliBridgeToken": "",
+    # 生图：她自己画图发过来。参考图放在 imageRefDir，一张正脸就够，
+    # 有参考图走图像编辑模型（锁住长相），没有才退回纯文生图。
+    "imageEnabled": True,
+    "imageEditModel": "wan2.5-i2i-preview",
+    "imageModel": "wan2.5-t2i-preview",
+    "imageSize": "1280*1280",
+    "imageCooldown": 900,
+    "imageLook": "",
+    "imageStyle": "",
+    "imageRefDir": "/data/image/refs",
+    "imageOutDir": "/data/image/out",
+    "imageKeep": 120,
+    "imageApiKey": "",
     "ttsProvider": "edge",
     "ttsVoice": "",
     "ttsModel": "",
@@ -307,6 +320,16 @@ def load_config(overrides=None):
         "CATGIRL_SCHEDULE_WORLD": "scheduleWorld",
         "CATGIRL_BILI_BRIDGE": "biliBridge",
         "CATGIRL_BILI_BRIDGE_TOKEN": "biliBridgeToken",
+        "CATGIRL_IMAGE_MODEL": "imageModel",
+        "CATGIRL_IMAGE_EDIT_MODEL": "imageEditModel",
+        "CATGIRL_IMAGE_SIZE": "imageSize",
+        "CATGIRL_IMAGE_COOLDOWN": "imageCooldown",
+        "CATGIRL_IMAGE_LOOK": "imageLook",
+        "CATGIRL_IMAGE_STYLE": "imageStyle",
+        "CATGIRL_IMAGE_REF_DIR": "imageRefDir",
+        "CATGIRL_IMAGE_OUT_DIR": "imageOutDir",
+        "CATGIRL_IMAGE_KEEP": "imageKeep",
+        "CATGIRL_IMAGE_API_KEY": "imageApiKey",
         "CATGIRL_TTS_PROVIDER": "ttsProvider",
         "CATGIRL_TTS_VOICE": "ttsVoice",
         "CATGIRL_TTS_MODEL": "ttsModel",
@@ -367,6 +390,10 @@ def load_config(overrides=None):
 
     cfg["disableThinking"] = _as_bool(_env("CATGIRL_DISABLE_THINKING", fileCfg.get("disableThinking")), True)
     cfg["scheduleEnabled"] = _as_bool(_env("CATGIRL_SCHEDULE", fileCfg.get("scheduleEnabled")), True)
+    cfg["imageEnabled"] = _as_bool(_env("CATGIRL_IMAGE", fileCfg.get("imageEnabled")), True)
+    # 冷却期给个下限 120 秒：填 0 会让每次对话都画一张，一天下来账单很难看
+    cfg["imageCooldown"] = max(120, int(cfg["imageCooldown"] or 900))
+    cfg["imageKeep"] = max(0, int(cfg["imageKeep"] or 120))
     cfg["ttsAuto"] = _as_bool(_env("CATGIRL_TTS_AUTO", fileCfg.get("ttsAuto")), False)
     cfg["qqEnabled"] = _as_bool(_env("CATGIRL_QQ_ENABLED", fileCfg.get("qqEnabled")), False)
     cfg["qqPrivate"] = _as_bool(_env("CATGIRL_QQ_PRIVATE", fileCfg.get("qqPrivate")), True)

@@ -36,6 +36,9 @@ services:
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
+      # 生图：参考图放 /data/image/refs，有参考图才走编辑模型锁住长相
+      CATGIRL_IMAGE: ${CATGIRL_IMAGE:-1}
+      CATGIRL_IMAGE_COOLDOWN: ${CATGIRL_IMAGE_COOLDOWN:-900}
       # 自建 GPT-SoVITS：跑在笔记本上，经 SSH 反向隧道映射到宿主机 9880
       CATGIRL_SOVITS_URL: ${CATGIRL_SOVITS_URL:-}
       CATGIRL_SOVITS_REF: ${CATGIRL_SOVITS_REF:-}
@@ -103,6 +106,9 @@ services:
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
+      # 生图：参考图放 /data/image/refs，有参考图才走编辑模型锁住长相
+      CATGIRL_IMAGE: ${CATGIRL_IMAGE:-1}
+      CATGIRL_IMAGE_COOLDOWN: ${CATGIRL_IMAGE_COOLDOWN:-900}
       # 自建 GPT-SoVITS：跑在笔记本上，经 SSH 反向隧道映射到宿主机 9880
       CATGIRL_SOVITS_URL: ${CATGIRL_SOVITS_URL:-}
       CATGIRL_SOVITS_REF: ${CATGIRL_SOVITS_REF:-}
@@ -192,6 +198,9 @@ services:
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
+      # 生图：参考图放 /data/image/refs，有参考图才走编辑模型锁住长相
+      CATGIRL_IMAGE: ${CATGIRL_IMAGE:-1}
+      CATGIRL_IMAGE_COOLDOWN: ${CATGIRL_IMAGE_COOLDOWN:-900}
       CATGIRL_QQBOT_ENABLED: "true"
       # q.qq.com 创建机器人后拿到的 AppID 和 AppSecret
       CATGIRL_QQBOT_APP_ID: ${CATGIRL_QQBOT_APP_ID:-}
@@ -258,6 +267,9 @@ services:
       # 看 B 站视频：容器里没 node，取稿走宿主机上的 bili-bridge
       CATGIRL_BILI_BRIDGE: ${CATGIRL_BILI_BRIDGE:-http://host.docker.internal:8791}
       CATGIRL_BILI_BRIDGE_TOKEN: ${CATGIRL_BILI_BRIDGE_TOKEN:-}
+      # 生图：参考图放 /data/image/refs，有参考图才走编辑模型锁住长相
+      CATGIRL_IMAGE: ${CATGIRL_IMAGE:-1}
+      CATGIRL_IMAGE_COOLDOWN: ${CATGIRL_IMAGE_COOLDOWN:-900}
       CATGIRL_VISION_MODEL: ${CATGIRL_VISION_MODEL:-qwen3.7-plus}
       CATGIRL_VISION_BASE_URL: ${CATGIRL_VISION_BASE_URL:-}
       CATGIRL_VISION_API_KEY: ${CATGIRL_VISION_API_KEY:-}

@@ -339,6 +339,24 @@ class ScheduleKeeper:
                 return seg
         return segments[0] if segments else None
 
+    def current(self, now=None):
+        """此刻那一段（含 doing / place / outfit）。没日程返回 None。
+
+        生图要拿「她现在在哪、穿什么」，单独开一个口子，
+        免得外面去碰 _segmentAt 这种内部实现。
+        """
+        if not self.enabled:
+            return None
+        try:
+            now = now or datetime.now(LOCAL_TZ)
+            plan = self.load(now.date())
+            segments = (plan or {}).get("segments") or []
+            if not segments:
+                return None
+            return self._segmentAt(segments, now.hour * 60 + now.minute)
+        except Exception:
+            return None
+
     def injectText(self, now=None):
         """给系统提示的一段。没日程、没开、出任何错，都返回空字符串。"""
         if not self.enabled:

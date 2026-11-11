@@ -11,6 +11,7 @@ import time
 from datetime import datetime, timedelta, timezone
 
 import bili
+import image
 from brain import Brain, BrainError
 from memory import MemoryStore
 from schedule import ScheduleKeeper
@@ -24,6 +25,9 @@ LOCAL_TZ = timezone(timedelta(hours=8))
 STATE_TAG = re.compile(r"<state\s*([^>]*?)\s*/?>\s*$", re.S)
 # 想唱歌时模型写 <sing title="歌名"/>，服务端据此发一段录音
 SING_TAG = re.compile(r"<sing\s+title\s*=\s*\"([^\"]*)\"\s*/?>", re.I)
+# 想画图时模型写 <draw>画面描述</draw>，服务端据此出图并发出
+DRAW_TAG = image.DRAW_TAG
+ANY_DRAW_TAG = image.ANY_DRAW
 ATTR = re.compile(r'(\w+)\s*=\s*"([^"]*)"')
 
 
@@ -181,6 +185,10 @@ class CatgirlCore:
             cfg, self.store, self.brain, name=self.name, persona=self.persona,
             isBusy=lambda: self._turnLock.locked(),
         )
+        # 生图：她自己决定画不画。参考图锁长相，能画但要不要画看她当时想不想说。
+        self.image = image.ImageStudio(
+            cfg, store=self.store, schedule=self.schedule, name=self.name,
+        )
 
     # ------------------------------------------------------------ 初始化
     def _load_persona(self):
@@ -328,6 +336,38 @@ class CatgirlCore:
             )
         else:
             lines.append("## 你会唱的歌\n- 曲库现在是空的，别答应唱歌，说还没学会。")
+
+        # 画图这一摊只在真能画的时候才提，不然她会答应了却发不出去
+        if self.image.ready():
+            left = self.image.cooldownLeft()
+            lines.append("")
+            lines.append("## 你会画图")
+            lines.append("你能真的画一张图发给他，要等将近一分钟。想画就在回复里写 <draw>画面描述</draw>，系统会画好发过去。")
+            lines.append(
+                "- 他说「看看你」「发张图」「你现在什么样子」「让我看看」的时候，必须画，光用嘴描述不算。"
+            )
+            lines.append(
+                "- 你自己想给他看的时候也可以画：刚做了一件有意思的事、窗外正好很好看。"
+            )
+            lines.append("- 纯闲聊、问候、他说累的时候，别画。大多数回复都不需要图。")
+            lines.append(
+                "- 描述写清楚在哪、在做什么、什么景别（手机自拍／近景／全身）、什么光线。"
+                "不用写自己长什么样，系统知道你是什么样子。"
+            )
+            lines.append("- 一次只能画一张。")
+            lines.append(
+                "- 这句话会在出图之前先发出去，所以写成「等我一下，马上给你看」这种预告，"
+                "别说「喏，刚拍的」——图还没好。"
+            )
+            lines.append("例子：他说「发张你现在的样子」，你就回：")
+            lines.append(
+                "等我一下哦 <draw>在录音棚里戴着大耳机，低头看谱子，手机自拍视角，暖黄灯光打在脸上</draw>"
+            )
+            if left > 0:
+                lines.append(
+                    f"- 你现在画不了：刚画过，大约还要 {max(1, left // 60)} 分钟。"
+                    "这条回复不要写 draw 标签，他问起来就说等会儿。"
+                )
 
         lines.append("")
         lines.append(
@@ -579,11 +619,24 @@ class CatgirlCore:
         if match:
             singTitle = match.group(1).strip()
 
+        # 画图请求：同理，标签里是给生图用的画面描述，不是给主人看的话
+        drawBrief = None
+        match = DRAW_TAG.search(rawReply)
+        if match:
+            drawBrief = match.group(1).strip()[:400]
+        elif image.BARE_DRAW.search(rawReply) and self.image.ready():
+            # 自闭合的 <draw/>：按「此刻」画一张，描述留空由日程补
+            drawBrief = ""
+
         # 标签只用于更新状态，不能进对话历史，否则下次会当作台词读到
-        cleanReply = strip_stage(SING_TAG.sub("", STATE_TAG.sub("", rawReply)))
+        stripped = STATE_TAG.sub("", image.ANY_DRAW.sub("", SING_TAG.sub("", rawReply)))
+        cleanReply = strip_stage(stripped)
         if not cleanReply:
-            # 全是旁白没有台词时不能存空行，退回原文
-            cleanReply = STATE_TAG.sub("", rawReply).strip()
+            # 全是旁白没有台词时不能存空行，退回原文——但标签必须剥掉，
+            # 不然「只写了 <draw>…</draw>」的回复会把标签当台词念给他听
+            cleanReply = strip_stage(
+                STATE_TAG.sub("", image.ANY_DRAW.sub("", SING_TAG.sub("", rawReply)))
+            )
         replyMood, replyV, replyA = self.apply_state(rawReply)
         self.store.add_turn(self.session, "user", hiddenText or userText)
         self.store.add_turn(self.session, "assistant", cleanReply)
@@ -596,6 +649,7 @@ class CatgirlCore:
             {
                 "reply": cleanReply,
                 "sing": singTitle,
+                "draw": drawBrief,
                 "bili": None if not biliPayload else {
                     "bvid": biliPayload.get("bvid"),
                     "title": biliPayload.get("title"),
